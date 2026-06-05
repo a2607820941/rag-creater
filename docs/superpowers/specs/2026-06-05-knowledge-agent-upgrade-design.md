@@ -128,6 +128,8 @@ model DocumentKnowledgeMap {
 
 The map should be generated after document parsing succeeds. If a document does not yet have a persisted map, the Knowledge Agent should fall back to a deterministic summary from `rawContent` and chunk metadata.
 
+Version 1 must generate `summary`, `keywordsJson`, `outlineJson`, and `signalsJson` with deterministic rules only. It should not call an LLM inside the parse pipeline. AI-generated summaries can be added in a later version as an asynchronous enhancement after the rule-based map exists.
+
 Generation should be attached to the existing document parsing pipeline:
 
 - `src/app/api/documents/[id]/parse/route.ts` calls `parseDocument`.
@@ -135,7 +137,15 @@ Generation should be attached to the existing document parsing pipeline:
 - `parseDocument` delegates successful chunk replacement and indexing to `replaceTextChunksAndIndex`.
 - `replaceTextChunksAndIndex` is the preferred trigger point because it also covers manual content/chunk replacement flows that re-index the document.
 
-The first implementation should generate the map synchronously after chunks are saved and indexed successfully. If map generation fails, parsing should still succeed and the error should be logged; the Knowledge Agent can fall back to deterministic summaries. A later background job can backfill or refresh maps without blocking document ingestion.
+The first implementation should generate the rule-based map synchronously after chunks are saved and indexed successfully. If map generation fails, parsing should still succeed and the error should be logged; the Knowledge Agent can fall back to deterministic summaries. A later background job can backfill, refresh maps, or add AI-generated summaries without blocking document ingestion.
+
+Backfill should be implemented as an idempotent maintenance path:
+
+- add a reusable service function that finds documents with `status: "parsed"` and `activeStatus: "active"` but no `DocumentKnowledgeMap`;
+- expose it through a one-off script or admin-only route during implementation, depending on the project's operational needs at that point;
+- process documents in small batches, default 50 per run;
+- use rule-based map generation in v1, so no LLM cost or retry policy is required for the initial backfill;
+- record failures in logs and continue with the next document.
 
 `signalsJson` should include review-oriented metadata such as:
 
@@ -168,7 +178,7 @@ Validation rules:
 - `files.documentIds` must contain 1 to 20 ids.
 - `knowledgeBase.knowledgeBaseIds` must contain 1 to 10 ids.
 - `all` must not accept extra narrowing fields in the first version.
-- All tools must enforce parsed and active document constraints at the database layer.
+- All tools must enforce `DocumentSource.status: "parsed"` and `DocumentSource.activeStatus: "active"` at the database layer.
 
 ## Tools
 
@@ -229,10 +239,13 @@ Behavior:
 Limits:
 
 - maximum 5 files per call for `full`
-- maximum 30 chunks per call for `chunks`
-- default limit 10 for `summary` and `chunks`
+- maximum 30 total chunks per call for `chunks`
+- default limit 10 total chunks for `chunks`
+- default limit 10 documents for `summary`
 - maximum 20,000 returned characters per round
 - maximum 60,000 returned characters across the whole loop
+
+For `chunks` mode, `limit` is counted across the whole requested scope, not per file. If `files` scope contains five documents and `limit` is 30, the tool returns at most 30 chunks total.
 
 ### `search_chunks`
 
@@ -251,7 +264,8 @@ Input:
 Behavior:
 
 - For `knowledgeBase`, convert scope directly to `RagRetrieveScope`.
-- For `files`, selected ids are `DocumentSource.id` values. The current RAG adapter maps `RagRetrieveScope.knowledgeIds` to `DocumentChunk.documentSourceId`, so the first implementation can pass these ids as `knowledgeIds`. This contract must be documented in the tool schema and tested. If the RAG type is later renamed, use `documentSourceIds` to make the meaning explicit.
+- For `files`, selected ids are `DocumentSource.id` values. Before calling `retrieveRagContexts`, resolve active knowledge-base relations for those documents through `KnowledgeBaseDocument`. Pass the resolved `knowledgeBaseIds` and pass the selected document ids as `knowledgeIds`, because the current RAG adapter maps `RagRetrieveScope.knowledgeIds` to `DocumentChunk.documentSourceId`.
+- If selected files have no active knowledge-base relation, `search_chunks` must not call RAG with an empty or fake `knowledgeBaseIds` list. It should return a structured tool result explaining that RAG search is unavailable for those files and instruct the model to use `retrieve_files` instead.
 - For `all`, resolve active knowledge bases first, then call `retrieveRagContexts`.
 
 This tool should return citations-compatible chunk references so final answers can point back to evidence.
