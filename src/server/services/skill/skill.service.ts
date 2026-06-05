@@ -1,4 +1,6 @@
 import crypto from "node:crypto";
+import fs from "node:fs/promises";
+import path from "node:path";
 
 import type { Prisma, Skill } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
@@ -41,6 +43,8 @@ const DEFAULT_OUTPUT_SCHEMA: JsonObject = {
     citations: { type: "array" },
   },
 };
+
+const SKILLS_DIR = path.join(process.cwd(), "skills");
 
 export async function createSkill(input: SkillCreateInput): Promise<SkillDTO> {
   const skill = await prisma.skill.create({
@@ -125,6 +129,9 @@ export async function updateSkill(
   if (input.version !== undefined) data.version = input.version;
 
   const skill = await prisma.skill.update({ where: { id }, data });
+  if (skill.status === "disabled") {
+    await removeMaterializedSkill(skill.slug);
+  }
   return toSkillDTO(skill);
 }
 
@@ -133,6 +140,7 @@ export async function deleteSkill(id: string): Promise<boolean> {
   if (!current) return false;
 
   await prisma.skill.delete({ where: { id } });
+  await removeMaterializedSkill(current.slug);
   return true;
 }
 
@@ -179,6 +187,7 @@ export async function publishSkill(
   });
 
   const published = await prisma.skill.findUniqueOrThrow({ where: { id } });
+  await materializePublishedSkill(toSkillDTO(published), manifest, origin);
   return { skill: toSkillDTO(published), manifest, apiKey };
 }
 
@@ -222,6 +231,16 @@ export async function testSkill(
   const skill = await prisma.skill.findUnique({ where: { id } });
   if (!skill) return null;
   return runSkill(skill, input);
+}
+
+export async function runInstalledSkill(
+  id: string,
+  input: SkillRunInput,
+  options?: { signal?: AbortSignal }
+): Promise<SkillRunResult | null> {
+  const skill = await prisma.skill.findUnique({ where: { id } });
+  if (!skill || skill.status !== "published") return null;
+  return runSkill(skill, input, options);
 }
 
 export async function exportSkillPackage(
@@ -344,7 +363,8 @@ export function toSkillDTO(skill: Skill): SkillDTO {
 
 async function runSkill(
   skill: Skill,
-  input: SkillRunInput
+  input: SkillRunInput,
+  options?: { signal?: AbortSignal }
 ): Promise<SkillRunResult> {
   const dto = toSkillDTO(skill);
   const question = extractQuestion(input.input);
@@ -369,7 +389,8 @@ async function runSkill(
   try {
     const answer = await createChatCompletion(
       messages,
-      input.llmInterface ?? "openai"
+      input.llmInterface ?? "openai",
+      options
     );
     const result = {
       answer: answer || "No answer generated.",
@@ -402,6 +423,45 @@ async function runSkill(
     });
     throw error;
   }
+}
+
+async function materializePublishedSkill(
+  skill: SkillDTO,
+  manifest: SkillManifest,
+  origin: string
+) {
+  const skillDir = path.join(SKILLS_DIR, skill.slug);
+  const packageFiles = buildSkillPackage(skill, origin).files;
+  const internalManifest = {
+    id: skill.id,
+    name: skill.name,
+    slug: skill.slug,
+    version: skill.version,
+    description: buildPackageDescription(skill),
+    runtime: {
+      type: "internal-skill",
+      skillId: skill.id,
+    },
+  };
+
+  await fs.mkdir(skillDir, { recursive: true });
+  await Promise.all(
+    packageFiles.map(async (file) => {
+      const relativePath = file.path.replace(`${skill.slug}/`, "");
+      const target = path.join(skillDir, relativePath);
+      await fs.mkdir(path.dirname(target), { recursive: true });
+      await fs.writeFile(target, file.content, "utf8");
+    })
+  );
+  await fs.writeFile(
+    path.join(skillDir, "manifest.json"),
+    JSON.stringify(internalManifest, null, 2),
+    "utf8"
+  );
+}
+
+async function removeMaterializedSkill(slug: string) {
+  await fs.rm(path.join(SKILLS_DIR, slug), { recursive: true, force: true });
 }
 
 function buildRunSystemPrompt(skill: SkillDTO, retrieve: RagRetrieveResponse) {

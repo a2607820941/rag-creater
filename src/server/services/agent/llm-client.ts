@@ -3,8 +3,20 @@ import type { LlmInterfaceKey } from "@/features/chat/chat.validation";
 
 export type LlmMessage = {
   role: ChatRole;
-  content: string;
+  content: string | LlmContentPart[];
 };
+
+export type LlmContentPart =
+  | {
+      type: "text";
+      text: string;
+    }
+  | {
+      type: "image_url";
+      image_url: {
+        url: string;
+      };
+    };
 
 type ChatCompletionChunk = {
   choices?: Array<{

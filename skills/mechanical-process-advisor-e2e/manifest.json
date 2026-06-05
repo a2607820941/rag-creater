@@ -1,0 +1,11 @@
+{
+  "id": "cmpzlgbop0000ecvgfx11z8qs",
+  "name": "机械产品工艺顾问验证 Skill",
+  "slug": "mechanical-process-advisor-e2e",
+  "version": "0.1.0",
+  "description": "当用户询问机械产品制造工艺、加工步骤、工艺要求或工艺知识时使用，基于机械产品工艺知识库回答并返回引用。 Use when an agent needs to invoke the published HTTP API Skill, follow its input/output schema, or return knowledge-grounded answers with citations.",
+  "runtime": {
+    "type": "internal-skill",
+    "skillId": "cmpzlgbop0000ecvgfx11z8qs"
+  }
+}

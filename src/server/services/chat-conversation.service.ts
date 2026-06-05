@@ -4,11 +4,19 @@ import type {
   ChatKnowledgeFile,
   ChatMessageDTO,
 } from "@/features/chat/chat.types";
+import type { LlmInterfaceKey } from "@/features/chat/chat.validation";
+import type { ChatConversation, ChatMessage } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
-import type { LlmMessage } from "@/server/services/agent/llm-client";
+import {
+  createChatCompletion,
+  type LlmMessage,
+} from "@/server/services/agent/llm-client";
 import type { KnowledgeFile } from "@/server/services/knowledge-agent-document.service";
 
 const RECENT_CHAT_MESSAGE_LIMIT = 8;
+const MEMORY_CONTEXT_WINDOW_TOKENS = 8000;
+const MEMORY_COMPACT_THRESHOLD_TOKENS = MEMORY_CONTEXT_WINDOW_TOKENS / 2;
+const MEMORY_SUMMARY_RETRY_LIMIT = 3;
 
 export async function listChatConversations(options?: {
   page?: number;
@@ -126,19 +134,35 @@ export async function deleteChatConversation(
   return true;
 }
 
-export async function listRecentChatLlmMessages(
-  conversationId: string
-): Promise<LlmMessage[]> {
-  const messages = await prisma.chatMessage.findMany({
-    where: { conversationId },
-    orderBy: { createdAt: "desc" },
-    take: RECENT_CHAT_MESSAGE_LIMIT,
+export async function prepareChatConversationMemory(
+  conversationId: string,
+  llmInterface: LlmInterfaceKey
+): Promise<{ recentMessages: LlmMessage[]; memorySummary: string | null }> {
+  const [conversation, messages] = await Promise.all([
+    prisma.chatConversation.findUnique({ where: { id: conversationId } }),
+    prisma.chatMessage.findMany({
+      where: { conversationId },
+      orderBy: { createdAt: "asc" },
+    }),
+  ]);
+
+  if (!conversation) {
+    throw new Error("Conversation not found");
+  }
+
+  const compactedConversation = await compactMemoryIfNeeded({
+    conversation,
+    messages,
+    llmInterface,
   });
 
-  return messages.reverse().map((message) => ({
-    role: message.role === "user" ? "user" : "assistant",
-    content: message.content,
-  }));
+  return {
+    recentMessages: messages.slice(-RECENT_CHAT_MESSAGE_LIMIT).map((message) => ({
+      role: message.role === "user" ? "user" : "assistant",
+      content: message.content,
+    })),
+    memorySummary: compactedConversation.memorySummary,
+  };
 }
 
 export async function persistChatExchange(input: {
@@ -147,9 +171,9 @@ export async function persistChatExchange(input: {
   assistantMessage: string;
   citations?: ChatCitation[];
   knowledgeFiles?: KnowledgeFile[];
-}) {
-  await prisma.$transaction(async (tx) => {
-    await tx.chatMessage.create({
+}): Promise<{ userMessageId: string; assistantMessageId: string }> {
+  return prisma.$transaction(async (tx) => {
+    const userMessage = await tx.chatMessage.create({
       data: {
         conversationId: input.conversationId,
         role: "user",
@@ -157,7 +181,7 @@ export async function persistChatExchange(input: {
       },
     });
 
-    await tx.chatMessage.create({
+    const assistantMessage = await tx.chatMessage.create({
       data: {
         conversationId: input.conversationId,
         role: "assistant",
@@ -175,15 +199,19 @@ export async function persistChatExchange(input: {
       where: { id: input.conversationId },
       data: { updatedAt: new Date() },
     });
+
+    return {
+      userMessageId: userMessage.id,
+      assistantMessageId: assistantMessage.id,
+    };
   });
 }
 
 export function mergeRecentMessages(
   messages: LlmMessage[],
-  recentMessages: LlmMessage[]
+  recentMessages: LlmMessage[],
+  memorySummary?: string | null
 ): LlmMessage[] {
-  if (recentMessages.length === 0) return messages;
-
   const [systemMessage, ...rest] = messages;
   const currentUserMessage = rest[rest.length - 1];
   const middleMessages = rest.slice(0, -1);
@@ -192,12 +220,144 @@ export function mergeRecentMessages(
     return [...recentMessages, ...messages];
   }
 
+  const systemWithMemory = memorySummary
+    ? {
+        ...systemMessage,
+        content: `${systemMessage.content}
+
+长期对话记忆：
+${memorySummary}`,
+      }
+    : systemMessage;
+
   return [
-    systemMessage,
+    systemWithMemory,
     ...middleMessages,
     ...recentMessages,
     currentUserMessage,
   ];
+}
+
+async function compactMemoryIfNeeded(input: {
+  conversation: ChatConversation;
+  messages: ChatMessage[];
+  llmInterface: LlmInterfaceKey;
+}): Promise<ChatConversation> {
+  const cursorIndex = input.conversation.memoryCursorMessageId
+    ? input.messages.findIndex(
+        (message) => message.id === input.conversation.memoryCursorMessageId
+      )
+    : -1;
+  const pendingMessages = input.messages.slice(Math.max(cursorIndex + 1, 0));
+  const estimatedTokens = estimateTokens(
+    pendingMessages.map((message) => message.content).join("\n\n")
+  );
+
+  if (
+    estimatedTokens <= MEMORY_COMPACT_THRESHOLD_TOKENS ||
+    pendingMessages.length <= RECENT_CHAT_MESSAGE_LIMIT
+  ) {
+    return input.conversation;
+  }
+
+  const compactableMessages = selectCompactableMessages(pendingMessages);
+  if (compactableMessages.length === 0) {
+    return input.conversation;
+  }
+
+  const oldMessageText = compactableMessages
+    .map((message) => `${message.role}: ${message.content}`)
+    .join("\n\n");
+  const cursorMessageId =
+    compactableMessages[compactableMessages.length - 1]?.id ??
+    input.conversation.memoryCursorMessageId;
+
+  let summary = "";
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= MEMORY_SUMMARY_RETRY_LIMIT; attempt += 1) {
+    try {
+      summary = await createChatCompletion(
+        [
+          {
+            role: "system",
+            content:
+              "你负责压缩多轮对话记忆。请输出 Markdown 摘要，保留用户目标、已确认事实、关键约束和未解决问题，不要加入知识库引用编号。",
+          },
+          {
+            role: "user",
+            content: `已有长期记忆：
+${input.conversation.memorySummary || "暂无"}
+
+需要合并进长期记忆的短期会话：
+${oldMessageText}`,
+          },
+        ],
+        input.llmInterface
+      );
+      break;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  const failed = !summary.trim();
+  const nextSummary = failed
+    ? buildFallbackMemorySummary({
+        previousSummary: input.conversation.memorySummary,
+        oldMessageText,
+        error: lastError,
+      })
+    : summary.trim();
+
+  return prisma.chatConversation.update({
+    where: { id: input.conversation.id },
+    data: {
+      memorySummary: nextSummary,
+      memoryCursorMessageId: cursorMessageId,
+      memoryFailureCount: failed
+        ? { increment: MEMORY_SUMMARY_RETRY_LIMIT }
+        : 0,
+    },
+  });
+}
+
+function estimateTokens(text: string): number {
+  return Math.ceil(text.length / 3);
+}
+
+function selectCompactableMessages(messages: ChatMessage[]): ChatMessage[] {
+  const retainedRecent = messages.slice(-RECENT_CHAT_MESSAGE_LIMIT);
+  const compactable = messages.slice(0, -retainedRecent.length);
+  const lastUserIndex = compactable
+    .map((message) => message.role)
+    .lastIndexOf("user");
+
+  if (lastUserIndex <= 0) {
+    return compactable;
+  }
+
+  return compactable.slice(0, lastUserIndex);
+}
+
+function buildFallbackMemorySummary(input: {
+  previousSummary: string | null;
+  oldMessageText: string;
+  error: unknown;
+}): string {
+  const errorMessage =
+    input.error instanceof Error ? input.error.message : "未知错误";
+
+  return [
+    input.previousSummary || "",
+    "",
+    "## [MEMORY_SUMMARY_FALLBACK]",
+    "",
+    `LLM 记忆压缩连续失败 ${MEMORY_SUMMARY_RETRY_LIMIT} 次，已将原始会话片段降级写入长期记忆。失败原因：${errorMessage}`,
+    "",
+    input.oldMessageText,
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 function createConversationTitle(message: string) {

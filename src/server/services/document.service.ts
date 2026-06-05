@@ -549,6 +549,7 @@ export async function getDocumentListService(params: {
     | "text"
     | "markdown"
     | "image"
+    | "conversation"
     | "all";
   activeStatus?: "active" | "disabled" | "all";
   status?: "uploading" | "uploaded" | "pending" | "parsing" | "parsed" | "failed" | "all";

@@ -1,75 +1,38 @@
 "use client";
 
 import {
-  useEffect,
   useCallback,
+  useEffect,
   useMemo,
   useRef,
   useState,
-  type ChangeEvent,
-  type ReactNode,
 } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import {
-  Bot,
-  ChevronDown,
-  FileText,
-  Image as ImageIcon,
-  Loader2,
-  MessageSquare,
-  Paperclip,
-  Plus,
-  Send,
-  Sparkles,
-  Square,
-  Trash2,
-  User,
-  X,
-} from "lucide-react";
+import { Plus, Sparkles, Trash2 } from "lucide-react";
 
 import { AdminShell } from "@/components/layout/admin-shell";
 import type {
-  ChatCitation,
   ChatConversationDTO,
   ChatMessageDTO,
+  ChatSkillDraftSaved,
 } from "@/features/chat/chat.types";
 
-type AgentItem = {
-  id: string;
-  name: string;
-  description?: string | null;
-  answerStyle: string;
-  status: string;
-};
-
-type ChatStreamStatus =
-  | "retrieving"
-  | "organizing"
-  | "reading-documents"
-  | "generating"
-  | "stopped"
-  | "failed";
-
-type RagSummary = {
-  status: "not-applicable" | "skipped" | "hit" | "miss";
-  citationCount: number;
-};
-
-type KnowledgeFile = {
-  id: string;
-  title: string;
-  chunkCount: number;
-};
-
-type UiMessage = Omit<ChatMessageDTO, "id" | "createdAt"> & {
-  id: string;
-  pending?: boolean;
-  streamStatus?: ChatStreamStatus;
-  ragSummary?: RagSummary;
-  knowledgeFiles?: KnowledgeFile[];
-};
-
-type ChatMode = "knowledge-agent" | "skill-agent" | "agent" | "openai";
+import { ChatComposer } from "./_components/chat-composer";
+import { ConversationSidebar } from "./_components/conversation-sidebar";
+import { MessageBubble } from "./_components/message-bubble";
+import { SkillPublishDialog } from "./_components/skill-publish-dialog";
+import { CHAT_MODE_OPTIONS } from "./_lib/chat-constants";
+import { readSseStream } from "./_lib/chat-sse";
+import type {
+  AgentItem,
+  ChatAttachmentDTO,
+  ChatComposerAttachment,
+  ChatMode,
+  ChatModeOption,
+  SkillPublishResponse,
+  SkillPublishState,
+  UiMessage,
+} from "./_lib/chat-types";
 
 type AgentListResponse = {
   success: boolean;
@@ -96,26 +59,15 @@ type ConversationListResponse = {
   };
 };
 
-type ChatAttachment = {
-  id: string;
-  fileName: string;
-  mimeType: string;
-  fileSize: number;
-  fileType: string;
-  kind: string;
-  status: string;
-  textPreview: string;
-  error?: string | null;
-};
-
 type ChatAttachmentResponse = {
   success: boolean;
-  data?: ChatAttachment;
+  data?: ChatAttachmentDTO;
   error?: {
     message?: string;
   };
 };
 
+<<<<<<< HEAD
 const CHAT_MODE_OPTIONS: Array<{
   value: ChatMode;
   label: string;
@@ -134,6 +86,8 @@ const AGENT_MENU_ITEM_HEIGHT = 56;
 const AGENT_MENU_VISIBLE_COUNT = 4;
 const AGENT_MENU_MAX_HEIGHT = AGENT_MENU_ITEM_HEIGHT * AGENT_MENU_VISIBLE_COUNT;
 
+=======
+>>>>>>> 983f3dd (feat:实现了skill的生成和上下文压缩)
 export default function AgentChatPage() {
   const [agents, setAgents] = useState<AgentItem[]>([]);
   const [conversations, setConversations] = useState<ChatConversationDTO[]>([]);
@@ -148,24 +102,31 @@ export default function AgentChatPage() {
   const [conversationId, setConversationId] = useState<string | undefined>();
   const [messages, setMessages] = useState<UiMessage[]>([]);
   const [input, setInput] = useState("");
-  const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
-  const [uploadingAttachment, setUploadingAttachment] = useState(false);
+  const [attachments, setAttachments] = useState<ChatComposerAttachment[]>([]);
+  const [pendingSkillDraft, setPendingSkillDraft] =
+    useState<ChatSkillDraftSaved | null>(null);
+  const [skillPublishState, setSkillPublishState] =
+    useState<SkillPublishState>({ status: "idle" });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const scrollContainerRef = useRef<HTMLElement>(null);
   const localMessageIdRef = useRef(0);
+  const localUploadIdRef = useRef(0);
   const shouldAutoScrollRef = useRef(true);
   const chatAbortRef = useRef<AbortController | null>(null);
+  const uploadAbortControllersRef = useRef<Map<string, AbortController>>(
+    new Map()
+  );
 
   const currentAgent = useMemo(
     () => agents.find((agent) => agent.id === agentId),
     [agents, agentId]
   );
-  const currentChatMode = useMemo(
+  const currentChatMode = useMemo<ChatModeOption>(
     () =>
       chatMode === "skill-agent"
         ? {
-            value: "skill-agent" as const,
+            value: "skill-agent",
             label: "Skill Agent",
             hint: "Create API Skill",
           }
@@ -173,13 +134,19 @@ export default function AgentChatPage() {
           CHAT_MODE_OPTIONS[0],
     [chatMode]
   );
-  // eslint-disable-next-line react-hooks/incompatible-library -- TanStack Virtual is intentionally used for long chat histories.
+  const hasUploadingAttachments = useMemo(
+    () => attachments.some((attachment) => attachment.status === "uploading"),
+    [attachments]
+  );
+
+  // eslint-disable-next-line react-hooks/incompatible-library -- React 19 rejects flushSync during virtual item measurement.
   const messageVirtualizer = useVirtualizer({
     count: messages.length,
     getScrollElement: () => scrollContainerRef.current,
     estimateSize: () => 128,
     overscan: 6,
     getItemKey: (index) => messages[index]?.id ?? index,
+    useFlushSync: false,
   });
 
   const fetchConversations = useCallback(() => {
@@ -200,6 +167,25 @@ export default function AgentChatPage() {
       });
   }, []);
 
+  const fetchConversationMessages = useCallback((id: string) => {
+    fetch(`/api/conversations/${id}/messages`)
+      .then((res) => res.json())
+      .then((json: MessageListResponse) => {
+        if (json.success && json.data) {
+          setMessages(
+            json.data.map((message) => ({
+              id: message.id,
+              role: message.role,
+              content: message.content,
+              citations: message.citations,
+              knowledgeFiles: message.knowledgeFiles,
+            }))
+          );
+        }
+      })
+      .catch(() => undefined);
+  }, []);
+
   useEffect(() => {
     const initialAgentId = new URLSearchParams(window.location.search).get(
       "agentId"
@@ -209,7 +195,7 @@ export default function AgentChatPage() {
       .then((res) => res.json())
       .then((json: AgentListResponse) => {
         if (!json.success || !json.data) {
-          throw new Error(json.error?.message || "加载 Agent 失败");
+          throw new Error(json.error?.message || "Failed to load agents");
         }
 
         const items = json.data.items;
@@ -223,14 +209,12 @@ export default function AgentChatPage() {
         setAgents(items);
         setAgentId((current) => {
           if (current) return current;
-          if (hasInitialAgent) {
-            return initialAgentId;
-          }
+          if (hasInitialAgent) return initialAgentId;
           return "";
         });
       })
       .catch((err) => {
-        setError(err instanceof Error ? err.message : "加载 Agent 失败");
+        setError(err instanceof Error ? err.message : "Failed to load agents");
       });
   }, []);
 
@@ -250,26 +234,6 @@ export default function AgentChatPage() {
       window.removeEventListener("blur", close);
     };
   }, [conversationMenu]);
-
-  useEffect(() => {
-    if (!conversationId || loading) return;
-    fetch(`/api/conversations/${conversationId}/messages`)
-      .then((res) => res.json())
-      .then((json: MessageListResponse) => {
-        if (json.success && json.data) {
-          setMessages(
-            json.data.map((message) => ({
-              id: message.id,
-              role: message.role,
-              content: message.content,
-              citations: message.citations,
-              knowledgeFiles: message.knowledgeFiles,
-            }))
-          );
-        }
-      })
-      .catch(() => undefined);
-  }, [conversationId, loading]);
 
   useEffect(() => {
     if (!shouldAutoScrollRef.current || messages.length === 0) return;
@@ -297,17 +261,47 @@ export default function AgentChatPage() {
     shouldAutoScrollRef.current = distanceToBottom < 120;
   }
 
+  function uploadAttachments(files: File[]) {
+    if (loading) return;
+
+    files.forEach((file) => {
+      void uploadAttachment(file);
+    });
+  }
+
   async function uploadAttachment(file: File) {
-    if (loading || uploadingAttachment) return;
+    if (loading) return;
 
     setError(null);
-    setUploadingAttachment(true);
+    localUploadIdRef.current += 1;
+    const localId = `upload-${localUploadIdRef.current}`;
+    const abortController = new AbortController();
+    uploadAbortControllersRef.current.set(localId, abortController);
+
+    const fileType = getFileType(file.name);
+    setAttachments((prev) => [
+      ...prev,
+      {
+        localId,
+        id: localId,
+        fileName: file.name,
+        mimeType: file.type || getMimeType(fileType),
+        fileSize: file.size,
+        fileType,
+        kind: isImageFileType(fileType) ? "image" : "file",
+        status: "uploading",
+        textPreview: "",
+        error: null,
+      },
+    ]);
+
     try {
       const formData = new FormData();
       formData.append("file", file);
 
       const res = await fetch("/api/chat/attachments", {
         method: "POST",
+        signal: abortController.signal,
         body: formData,
       });
       const json = (await res
@@ -315,24 +309,71 @@ export default function AgentChatPage() {
         .catch(() => null)) as ChatAttachmentResponse | null;
 
       if (!res.ok || !json?.success || !json.data) {
-        throw new Error(json?.error?.message || "附件上传失败");
+        throw new Error(json?.error?.message || "Attachment upload failed");
       }
 
-      setAttachments((prev) => [...prev, json.data!]);
+      setAttachments((prev) =>
+        prev.map((attachment) =>
+          attachment.localId === localId
+            ? { ...json.data!, localId }
+            : attachment
+        )
+      );
     } catch (err) {
-      setError(err instanceof Error ? err.message : "附件上传失败");
+      if (
+        abortController.signal.aborted ||
+        (err instanceof Error && err.name === "AbortError")
+      ) {
+        setAttachments((prev) =>
+          prev.filter((attachment) => attachment.localId !== localId)
+        );
+        return;
+      }
+
+      const messageText =
+        err instanceof Error ? err.message : "Attachment upload failed";
+      setError(err instanceof Error ? err.message : "Attachment upload failed");
+      setAttachments((prev) =>
+        prev.map((attachment) =>
+          attachment.localId === localId
+            ? { ...attachment, status: "failed", error: messageText }
+            : attachment
+        )
+      );
     } finally {
-      setUploadingAttachment(false);
+      uploadAbortControllersRef.current.delete(localId);
     }
   }
 
-  function removeAttachment(id: string) {
-    setAttachments((prev) => prev.filter((item) => item.id !== id));
+  function removeAttachment(localId: string) {
+    uploadAbortControllersRef.current.get(localId)?.abort();
+    uploadAbortControllersRef.current.delete(localId);
+    setAttachments((prev) => prev.filter((item) => item.localId !== localId));
+  }
+
+  function abortPendingUploads() {
+    uploadAbortControllersRef.current.forEach((controller) =>
+      controller.abort()
+    );
+    uploadAbortControllersRef.current.clear();
   }
 
   async function sendMessage() {
-    const message = input.trim();
-    if (!message || loading) return;
+    const typedMessage = input.trim();
+    const readyAttachments = attachments.filter(
+      (attachment) => attachment.status === "ready"
+    );
+    if ((!typedMessage && readyAttachments.length === 0) || loading) return;
+
+    if (
+      chatMode === "skill-agent" &&
+      pendingSkillDraft &&
+      isSkillPublishCommand(typedMessage)
+    ) {
+      setInput("");
+      await publishPendingSkillDraft();
+      return;
+    }
 
     setError(null);
     setLoading(true);
@@ -342,12 +383,15 @@ export default function AgentChatPage() {
     shouldAutoScrollRef.current = true;
     localMessageIdRef.current += 1;
     const localId = localMessageIdRef.current;
+    const message =
+      typedMessage || "Please analyze the uploaded attachment(s).";
 
     const userMessage: UiMessage = {
       id: `user-${localId}`,
       role: "user",
       content: message,
       citations: [],
+      attachments: readyAttachments,
     };
     const assistantMessage: UiMessage = {
       id: `assistant-${localId}`,
@@ -355,18 +399,16 @@ export default function AgentChatPage() {
       content: "",
       citations: [],
       pending: true,
-      streamStatus: "organizing",
     };
     setMessages((prev) => [...prev, userMessage, assistantMessage]);
 
-    const requiresAgent = chatMode === "agent";
-    if (requiresAgent && !agentId) {
+    if (chatMode === "agent" && !agentId) {
       setMessages((prev) =>
         prev.map((item) =>
           item.id === assistantMessage.id
             ? {
                 ...item,
-                content: "当前模式需要先创建并启用一个 Agent。",
+                content: "Please select an Agent before sending.",
                 pending: false,
               }
             : item
@@ -380,6 +422,7 @@ export default function AgentChatPage() {
     }
 
     try {
+<<<<<<< HEAD
       const endpoint =
         chatMode === "agent" && agentId
           ? `/api/agents/${agentId}/chat`
@@ -388,6 +431,10 @@ export default function AgentChatPage() {
         .filter((attachment) => attachment.status === "ready")
         .map((attachment) => attachment.id);
       const res = await fetch(endpoint, {
+=======
+      const attachmentIds = readyAttachments.map((attachment) => attachment.id);
+      const res = await fetch("/api/chat", {
+>>>>>>> 983f3dd (feat:实现了skill的生成和上下文压缩)
         method: "POST",
         signal: abortController.signal,
         headers: { "Content-Type": "application/json" },
@@ -411,7 +458,7 @@ export default function AgentChatPage() {
 
       if (!res.ok || !res.body) {
         const json = await res.json().catch(() => null);
-        throw new Error(json?.error?.message || "发送失败");
+        throw new Error(json?.error?.message || "Chat request failed");
       }
 
       await readSseStream(res.body, {
@@ -434,6 +481,7 @@ export default function AgentChatPage() {
             )
           );
         },
+<<<<<<< HEAD
         status: (status) => {
           setMessages((prev) =>
             prev.map((item) =>
@@ -450,6 +498,10 @@ export default function AgentChatPage() {
             )
           );
         },
+=======
+        status: () => undefined,
+        trace: () => undefined,
+>>>>>>> 983f3dd (feat:实现了skill的生成和上下文压缩)
         knowledgeFiles: (knowledgeFiles) => {
           setMessages((prev) =>
             prev.map((item) =>
@@ -459,8 +511,12 @@ export default function AgentChatPage() {
             )
           );
         },
+        skillDraftSaved: (skillDraft) => {
+          setPendingSkillDraft(skillDraft);
+          setSkillPublishState({ status: "idle" });
+        },
         error: (data) => {
-          throw new Error(data.message || "回答生成失败");
+          throw new Error(data.message || "Chat failed");
         },
       });
 
@@ -481,9 +537,8 @@ export default function AgentChatPage() {
             item.id === assistantMessage.id
               ? {
                   ...item,
-                  content: item.content || "已停止生成。",
+                  content: item.content || "Stopped",
                   pending: false,
-                  streamStatus: "stopped",
                 }
               : item
           )
@@ -491,16 +546,15 @@ export default function AgentChatPage() {
         return;
       }
 
-      const messageText = err instanceof Error ? err.message : "回答生成失败";
+      const messageText = err instanceof Error ? err.message : "Chat failed";
       setError(messageText);
       setMessages((prev) =>
         prev.map((item) =>
           item.id === assistantMessage.id
             ? {
                 ...item,
-                content: `生成失败：${messageText}`,
+                content: `Request failed: ${messageText}`,
                 pending: false,
-                streamStatus: "failed",
               }
             : item
         )
@@ -520,9 +574,11 @@ export default function AgentChatPage() {
   function startNewConversation() {
     chatAbortRef.current?.abort();
     chatAbortRef.current = null;
+    abortPendingUploads();
     setLoading(false);
     setConversationId(undefined);
     setMessages([]);
+    setAttachments([]);
     setError(null);
     shouldAutoScrollRef.current = true;
   }
@@ -532,6 +588,7 @@ export default function AgentChatPage() {
 
     chatAbortRef.current?.abort();
     chatAbortRef.current = null;
+    abortPendingUploads();
     setConversationId(conversation.id);
     setMessages([]);
     setInput("");
@@ -540,6 +597,7 @@ export default function AgentChatPage() {
     setConversationMenu(null);
     setAgentId(conversation.agentId ?? "");
     setChatMode(toClientChatMode(conversation.mode, conversation.agentId));
+    fetchConversationMessages(conversation.id);
     shouldAutoScrollRef.current = true;
   }
 
@@ -569,6 +627,42 @@ export default function AgentChatPage() {
     }
   }
 
+  async function publishPendingSkillDraft() {
+    if (!pendingSkillDraft || skillPublishState.status === "publishing") return;
+
+    setError(null);
+    setSkillPublishState({ status: "publishing" });
+    try {
+      const res = await fetch(pendingSkillDraft.publishEndpoint, {
+        method: "POST",
+      });
+      const json = (await res.json().catch(() => null)) as
+        | SkillPublishResponse
+        | null;
+
+      if (!res.ok || !json?.success || !json.data) {
+        throw new Error(json?.error?.message || "Skill publish failed");
+      }
+
+      setSkillPublishState({
+        status: "published",
+        skill: json.data.skill,
+        endpoint: json.data.manifest.runtime.endpoint,
+        apiKey: json.data.apiKey,
+      });
+    } catch (err) {
+      const messageText =
+        err instanceof Error ? err.message : "Skill publish failed";
+      setError(messageText);
+      setSkillPublishState({ status: "idle" });
+    }
+  }
+
+  function closeSkillPublishDialog() {
+    setPendingSkillDraft(null);
+    setSkillPublishState({ status: "idle" });
+  }
+
   const sidebarContent = (
     <ConversationSidebar
       conversations={conversations}
@@ -595,11 +689,19 @@ export default function AgentChatPage() {
                   </div>
                   <div className="min-w-0">
                     <p className="truncate text-sm font-semibold">
+<<<<<<< HEAD
                       Embark 知识助手
                     </p>
                     <p className="truncate text-xs text-slate-500">
                       {currentChatMode.label}
                       {currentAgent ? ` · ${currentAgent.name}` : ""}
+=======
+                      Embark Chat
+                    </p>
+                    <p className="truncate text-xs text-slate-500">
+                      {currentChatMode.label}
+                      {currentAgent ? ` / ${currentAgent.name}` : ""}
+>>>>>>> 983f3dd (feat:实现了skill的生成和上下文压缩)
                     </p>
                   </div>
                 </div>
@@ -609,7 +711,11 @@ export default function AgentChatPage() {
                   className="inline-flex h-9 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
                 >
                   <Plus aria-hidden="true" />
+<<<<<<< HEAD
                   新对话
+=======
+                  New
+>>>>>>> 983f3dd (feat:实现了skill的生成和上下文压缩)
                 </button>
               </div>
             </header>
@@ -623,7 +729,11 @@ export default function AgentChatPage() {
                     <Sparkles aria-hidden="true" />
                   </div>
                   <h1 className="text-3xl font-semibold tracking-normal text-slate-950 md:text-4xl">
+<<<<<<< HEAD
                     Hi，我是 Embark，让你的知识触手可及
+=======
+                    Ask Embark anything
+>>>>>>> 983f3dd (feat:实现了skill的生成和上下文压缩)
                   </h1>
                 </div>
 
@@ -631,7 +741,7 @@ export default function AgentChatPage() {
                   value={input}
                   attachments={attachments}
                   loading={loading}
-                  uploadingAttachment={uploadingAttachment}
+                  hasUploadingAttachments={hasUploadingAttachments}
                   error={error}
                   menuOpen={menuOpen}
                   currentChatMode={currentChatMode}
@@ -641,7 +751,7 @@ export default function AgentChatPage() {
                   onValueChange={setInput}
                   onSubmit={sendMessage}
                   onStop={stopMessage}
-                  onUploadAttachment={uploadAttachment}
+                  onUploadAttachments={uploadAttachments}
                   onRemoveAttachment={removeAttachment}
                   onMenuOpenChange={setMenuOpen}
                   onModeChange={setChatMode}
@@ -692,7 +802,11 @@ export default function AgentChatPage() {
                     value={input}
                     attachments={attachments}
                     loading={loading}
+<<<<<<< HEAD
                     uploadingAttachment={uploadingAttachment}
+=======
+                    hasUploadingAttachments={hasUploadingAttachments}
+>>>>>>> 983f3dd (feat:实现了skill的生成和上下文压缩)
                     error={error}
                     menuOpen={menuOpen}
                     currentChatMode={currentChatMode}
@@ -702,7 +816,11 @@ export default function AgentChatPage() {
                     onValueChange={setInput}
                     onSubmit={sendMessage}
                     onStop={stopMessage}
+<<<<<<< HEAD
                     onUploadAttachment={uploadAttachment}
+=======
+                    onUploadAttachments={uploadAttachments}
+>>>>>>> 983f3dd (feat:实现了skill的生成和上下文压缩)
                     onRemoveAttachment={removeAttachment}
                     onMenuOpenChange={setMenuOpen}
                     onModeChange={setChatMode}
@@ -713,6 +831,10 @@ export default function AgentChatPage() {
             </>
           )}
         </main>
+<<<<<<< HEAD
+=======
+
+>>>>>>> 983f3dd (feat:实现了skill的生成和上下文压缩)
         {conversationMenu && (
           <div
             className="fixed z-50 min-w-32 rounded-md border border-slate-200 bg-white p-1 text-sm shadow-xl shadow-slate-900/10"
@@ -730,11 +852,21 @@ export default function AgentChatPage() {
             </button>
           </div>
         )}
+<<<<<<< HEAD
+=======
+        <SkillPublishDialog
+          draft={pendingSkillDraft}
+          state={skillPublishState}
+          onPublish={publishPendingSkillDraft}
+          onClose={closeSkillPublishDialog}
+        />
+>>>>>>> 983f3dd (feat:实现了skill的生成和上下文压缩)
       </div>
     </AdminShell>
   );
 }
 
+<<<<<<< HEAD
 function ConversationSidebar({
   conversations,
   activeConversationId,
@@ -1104,37 +1236,22 @@ function ChatComposer({
       </div>
     </div>
   );
+=======
+function isSkillPublishCommand(message: string) {
+  return /^(publish|publish skill|发布|确认发布)$/i.test(message.trim());
 }
 
-function ModeMenuButton({
-  active,
-  label,
-  hint,
-  onClick,
-}: {
-  active: boolean;
-  label: string;
-  hint: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`w-full rounded-md px-2 py-1.5 text-left text-xs ${
-        active
-          ? "bg-emerald-50 text-emerald-800"
-          : "text-slate-700 hover:bg-slate-50"
-      }`}
-    >
-      <span className="block truncate font-medium leading-5">{label}</span>
-      <span className="block truncate text-[11px] leading-4 text-slate-500">
-        {hint}
-      </span>
-    </button>
-  );
+function getFileType(fileName: string) {
+  const extension = fileName.split(".").pop()?.toLowerCase().trim();
+  return extension || "file";
+>>>>>>> 983f3dd (feat:实现了skill的生成和上下文压缩)
 }
 
+function isImageFileType(fileType: string) {
+  return ["png", "jpg", "jpeg", "webp", "bmp"].includes(fileType);
+}
+
+<<<<<<< HEAD
 function IconToolButton({
   label,
   children,
@@ -1367,80 +1484,18 @@ function summarizeCitationContent(content: string) {
   return normalized.length > 180
     ? `${normalized.slice(0, 180)}...`
     : normalized;
+=======
+function getMimeType(fileType: string) {
+  if (fileType === "jpg") return "image/jpeg";
+  if (isImageFileType(fileType)) return `image/${fileType}`;
+  return "application/octet-stream";
+>>>>>>> 983f3dd (feat:实现了skill的生成和上下文压缩)
 }
 
 function toClientChatMode(mode: string, agentId: string | null): ChatMode {
   if (agentId || mode === "agent") return "agent";
   if (mode === "skill-agent") return "skill-agent";
   if (mode === "openai") return "openai";
+  if (mode === "rag-openai") return "rag-openai";
   return "knowledge-agent";
-}
-
-function formatConversationTime(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-
-  const now = new Date();
-  const sameDay = date.toDateString() === now.toDateString();
-
-  if (sameDay) {
-    return date.toLocaleTimeString(undefined, {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  }
-
-  return date.toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-  });
-}
-
-async function readSseStream(
-  body: ReadableStream<Uint8Array>,
-  handlers: {
-    meta: (data: { conversationId?: string }) => void;
-    token: (token: string) => void;
-    citations: (citations: ChatCitation[]) => void;
-    status: (data: { status: ChatStreamStatus }) => void;
-    ragSummary: (data: RagSummary) => void;
-    knowledgeFiles: (data: KnowledgeFile[]) => void;
-    error: (data: { message?: string }) => void;
-  }
-) {
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-
-    buffer += decoder.decode(value, { stream: true });
-    const events = buffer.split("\n\n");
-    buffer = events.pop() ?? "";
-
-    for (const eventText of events) {
-      const lines = eventText.split("\n");
-      const event = lines
-        .find((line) => line.startsWith("event:"))
-        ?.slice(6)
-        .trim();
-      const dataText = lines
-        .find((line) => line.startsWith("data:"))
-        ?.slice(5)
-        .trim();
-
-      if (!event || !dataText) continue;
-      const data = JSON.parse(dataText);
-
-      if (event === "meta") handlers.meta(data);
-      if (event === "token") handlers.token(data);
-      if (event === "citations") handlers.citations(data);
-      if (event === "status") handlers.status(data);
-      if (event === "rag-summary") handlers.ragSummary(data);
-      if (event === "knowledge-files") handlers.knowledgeFiles(data);
-      if (event === "error") handlers.error(data);
-    }
-  }
 }

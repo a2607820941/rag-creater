@@ -1,0 +1,3 @@
+display_name: "机械产品工艺咨询专家"
+short_description: "基于机械产品工艺知识库，回答关于材料热处理、焊接工艺评定、切削参数等工艺问题，提供具体参数、步骤说明并引用知识库原文"
+default_prompt: "Use 机械产品工艺咨询专家 to answer the user's request with the configured knowledge base and return citations when available."

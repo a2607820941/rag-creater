@@ -168,3 +168,12 @@ body {
   flex: 1 1 auto;
   min-height: 0;
 }
+
+.chat-markdown .chat-ref {
+  margin-left: 0.125rem;
+  color: rgb(5 150 105);
+  font-size: 0.72em;
+  font-weight: 600;
+  line-height: 0;
+  vertical-align: super;
+}

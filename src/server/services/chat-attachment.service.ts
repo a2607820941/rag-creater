@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
+import type { ChatAttachmentDTO } from "@/features/chat/chat.types";
 import { prisma } from "@/lib/db";
 import {
   getFileTypeFromName,
@@ -8,24 +9,14 @@ import {
   parseFileContent,
   validateFileType,
 } from "@/lib/file-parser";
+import type { LlmContentPart } from "@/server/services/agent/llm-client";
 
 const CHAT_UPLOAD_DIR = path.join(process.cwd(), "public", "uploads", "chat");
 const ATTACHMENT_CONTEXT_CHAR_LIMIT = 12000;
 const ATTACHMENT_PREVIEW_CHAR_LIMIT = 240;
+const CHAT_IMAGE_MAX_SIZE = 20 * 1024 * 1024;
 
 const IMAGE_FILE_TYPES = new Set(["png", "jpg", "jpeg", "webp", "bmp"]);
-
-export type ChatAttachmentDTO = {
-  id: string;
-  fileName: string;
-  mimeType: string;
-  fileSize: number;
-  fileType: string;
-  kind: string;
-  status: string;
-  textPreview: string;
-  error?: string | null;
-};
 
 async function ensureChatUploadDir(): Promise<void> {
   await fs.mkdir(CHAT_UPLOAD_DIR, { recursive: true });
@@ -43,6 +34,10 @@ export async function createChatAttachment(
   }
 
   const kind = IMAGE_FILE_TYPES.has(fileType) ? "image" : "file";
+  if (kind === "image" && file.size > CHAT_IMAGE_MAX_SIZE) {
+    throw new Error("聊天图片大小不能超过 20MB");
+  }
+
   const attachment = await prisma.chatAttachment.create({
     data: {
       fileName: file.name,
@@ -74,6 +69,27 @@ export async function createChatAttachment(
       },
     });
     throw new Error(`附件保存失败：${message}`);
+  }
+
+  if (kind === "image") {
+    let parsedText: string;
+    try {
+      parsedText = await parseFileContent(buffer, fileType);
+    } catch {
+      parsedText = "[图片已上传，但暂时无法识别图片内容]";
+    }
+
+    const updated = await prisma.chatAttachment.update({
+      where: { id: attachment.id },
+      data: {
+        filePath: publicPath,
+        parsedText,
+        status: "ready",
+        error: null,
+      },
+    });
+
+    return toChatAttachmentDTO(updated);
   }
 
   try {
@@ -138,6 +154,46 @@ ${content}`;
 ${sections.join("\n\n")}`;
 }
 
+export async function buildAttachmentImageParts(
+  attachmentIds: string[] | undefined
+): Promise<LlmContentPart[]> {
+  if (process.env.CHAT_MULTIMODAL_ENABLED !== "true") return [];
+
+  const ids = Array.from(new Set(attachmentIds ?? [])).filter(Boolean);
+  if (ids.length === 0) return [];
+
+  const attachments = await prisma.chatAttachment.findMany({
+    where: {
+      id: { in: ids },
+      kind: "image",
+      status: "ready",
+    },
+    orderBy: { createdAt: "asc" },
+  });
+
+  const parts: LlmContentPart[] = [];
+  for (const attachment of attachments) {
+    if (attachment.fileSize > CHAT_IMAGE_MAX_SIZE) continue;
+
+    const storedName = path.basename(attachment.filePath);
+    if (!storedName) continue;
+
+    try {
+      const buffer = await fs.readFile(path.join(CHAT_UPLOAD_DIR, storedName));
+      parts.push({
+        type: "image_url",
+        image_url: {
+          url: `data:${attachment.mimeType};base64,${buffer.toString("base64")}`,
+        },
+      });
+    } catch {
+      // Ignore missing image files while preserving other attachments.
+    }
+  }
+
+  return parts;
+}
+
 function toChatAttachmentDTO(attachment: {
   id: string;
   fileName: string;
@@ -145,6 +201,7 @@ function toChatAttachmentDTO(attachment: {
   fileSize: number;
   fileType: string;
   kind: string;
+  filePath: string;
   status: string;
   parsedText: string | null;
   error: string | null;
@@ -157,6 +214,7 @@ function toChatAttachmentDTO(attachment: {
     fileType: attachment.fileType,
     kind: attachment.kind,
     status: attachment.status,
+    fileUrl: attachment.filePath || undefined,
     textPreview: truncateText(
       attachment.parsedText || attachment.error || "",
       ATTACHMENT_PREVIEW_CHAR_LIMIT

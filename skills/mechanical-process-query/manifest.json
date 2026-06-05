@@ -1,0 +1,11 @@
+{
+  "id": "cmq0iodl200097svg1qwg3h11",
+  "name": "机械产品工艺查询",
+  "slug": "mechanical-process-query",
+  "version": "0.1.0",
+  "description": "基于机械产品工艺知识库，查询工艺参数、规范标准、材料选择建议和加工流程步骤。当知识库中无相关信息时返回空结果。 Use when an agent needs to invoke the published HTTP API Skill, follow its input/output schema, or return knowledge-grounded answers with citations.",
+  "runtime": {
+    "type": "internal-skill",
+    "skillId": "cmq0iodl200097svg1qwg3h11"
+  }
+}

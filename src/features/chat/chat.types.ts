@@ -1,8 +1,4 @@
-import type {
-  KnowledgeChunkType,
-  RagContext,
-  RagRetrieveResponse,
-} from "@/features/rag/types";
+import type { KnowledgeChunkType } from "@/features/rag/types";
 
 export type ChatRole = "user" | "assistant" | "system";
 
@@ -24,6 +20,70 @@ export type ChatKnowledgeFile = {
   chunkCount: number;
 };
 
+export type ChatStreamStatus =
+  | "retrieving"
+  | "organizing"
+  | "reading-documents"
+  | "generating"
+  | "stopped"
+  | "failed";
+
+export type ChatRagSummary = {
+  status: "not-applicable" | "skipped" | "hit" | "miss";
+  citationCount: number;
+};
+
+export type ChatSkillDraftSaved = {
+  id: string;
+  name: string;
+  slug: string;
+  status: "draft";
+  publishEndpoint: string;
+};
+
+export type ChatAttachmentDTO = {
+  id: string;
+  fileName: string;
+  mimeType: string;
+  fileSize: number;
+  fileType: string;
+  kind: string;
+  status: string;
+  fileUrl?: string;
+  textPreview: string;
+  error?: string | null;
+};
+
+export type ChatTraceStep = {
+  id: string;
+  type:
+    | "plan"
+    | "skill"
+    | "retrieval"
+    | "evidence"
+    | "generation"
+    | "warning";
+  title: string;
+  detail?: string;
+  status: "running" | "completed" | "failed";
+  createdAt: string;
+};
+
+export type ChatStreamEventPayloadMap = {
+  meta: { conversationId: string };
+  status: { status: ChatStreamStatus };
+  trace: ChatTraceStep;
+  token: string;
+  citations: ChatCitation[];
+  "rag-summary": ChatRagSummary;
+  "knowledge-files": ChatKnowledgeFile[];
+  "skill-draft-saved": ChatSkillDraftSaved;
+  error: { code: string; message: string };
+  done: { ok: true };
+};
+
+export type ChatStreamEventName = keyof ChatStreamEventPayloadMap;
+
 export type ChatMessageDTO = {
   id: string;
   role: Exclude<ChatRole, "system">;
@@ -42,22 +102,4 @@ export type ChatConversationDTO = {
   messageCount: number;
   createdAt: string;
   updatedAt: string;
-};
-
-export type AgentConversationDTO = {
-  id: string;
-  agentId: string;
-  title: string;
-  memorySummary: string | null;
-  memoryCursorMessageId: string | null;
-  memoryFailureCount: number;
-  status: string;
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type AgentChatContext = {
-  retrieve: RagRetrieveResponse;
-  contexts: RagContext[];
-  citations: ChatCitation[];
 };

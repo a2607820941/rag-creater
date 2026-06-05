@@ -46,10 +46,11 @@ export async function retrieveRagContexts(
   const resultGroups = (
     await Promise.all(
       processedQuery.retrievalQueries.map(async (retrievalQuery) => {
-        const queryVector = await embedQuery(retrievalQuery);
-        const vectorResults = (await searchByVector(scopedChunks, queryVector))
-          .filter((item) => item.score >= RAG_CONFIG.vectorMinScore)
-          .slice(0, candidateLimit);
+        const vectorResults = await searchByVectorWithFallback(
+          scopedChunks,
+          retrievalQuery,
+          candidateLimit
+        );
         const bm25Results = searchByBm25(scopedChunks, retrievalQuery).slice(
           0,
           candidateLimit
@@ -94,6 +95,25 @@ export async function retrieveRagContexts(
 }
 
 /** 根据 Agent 传入的 scope 和知识状态过滤可参与检索的 chunk。 */
+async function searchByVectorWithFallback(
+  chunks: KnowledgeChunk[],
+  query: string,
+  candidateLimit: number
+) {
+  try {
+    const queryVector = await embedQuery(query);
+    return (await searchByVector(chunks, queryVector))
+      .filter((item) => item.score >= RAG_CONFIG.vectorMinScore)
+      .slice(0, candidateLimit);
+  } catch (error) {
+    console.warn(
+      "Vector query failed, continuing with keyword retrieval:",
+      error instanceof Error ? error.message : error
+    );
+    return [];
+  }
+}
+
 function isChunkInScope(
   chunk: KnowledgeChunk,
   request: RagRetrieveRequest

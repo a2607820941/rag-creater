@@ -213,45 +213,8 @@ model ExpertAgent {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  conversations AgentConversation[]
-
   @@index([status])
   @@index([answerStyle])
-  @@index([createdAt])
-}
-
-model AgentConversation {
-  id                    String  @id @default(cuid())
-  agentId               String
-  title                 String
-  memorySummary         String?
-  memoryCursorMessageId String?
-  memoryFailureCount    Int     @default(0)
-  status                String  @default("active")
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  agent    ExpertAgent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
-  messages AgentMessage[]
-
-  @@index([agentId])
-  @@index([status])
-  @@index([updatedAt])
-}
-
-model AgentMessage {
-  id             String  @id @default(cuid())
-  conversationId String
-  role           String
-  content        String
-  citationsJson  String?
-
-  createdAt DateTime @default(now())
-
-  conversation AgentConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-
-  @@index([conversationId])
   @@index([createdAt])
 }
 
@@ -277,11 +240,14 @@ model ChatAttachment {
 }
 
 model ChatConversation {
-  id      String  @id @default(cuid())
-  title   String
-  mode    String
-  agentId String?
-  status  String  @default("active")
+  id                    String  @id @default(cuid())
+  title                 String
+  mode                  String
+  agentId               String?
+  memorySummary         String?
+  memoryCursorMessageId String?
+  memoryFailureCount    Int     @default(0)
+  status                String  @default("active")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

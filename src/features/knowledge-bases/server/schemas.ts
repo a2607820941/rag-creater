@@ -25,6 +25,7 @@ export const sourceTypeSchema = z.enum([
   "text",
   "markdown",
   "image",
+  "conversation",
 ]);
 
 export const sourceTypeWithAllSchema = z.enum([
@@ -34,6 +35,7 @@ export const sourceTypeWithAllSchema = z.enum([
   "text",
   "markdown",
   "image",
+  "conversation",
   "all",
 ]);
 

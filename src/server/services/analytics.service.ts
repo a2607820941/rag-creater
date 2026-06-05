@@ -221,13 +221,23 @@ async function getRecentAgents(limit = RECENT_AGENT_LIMIT): Promise<DashboardAge
       knowledgeScope: true,
       status: true,
       updatedAt: true,
-      _count: {
-        select: {
-          conversations: true,
-        },
-      },
     },
   });
+  const conversationGroups = await prisma.chatConversation.groupBy({
+    by: ["agentId"],
+    where: {
+      agentId: { in: items.map((agent) => agent.id) },
+      status: "active",
+    },
+    _count: {
+      agentId: true,
+    },
+  });
+  const conversationCountByAgentId = new Map(
+    conversationGroups
+      .filter((group) => group.agentId)
+      .map((group) => [group.agentId, group._count.agentId])
+  );
 
   return items.map((agent) => {
     const scope = parseAgentKnowledgeScope(agent.knowledgeScope);
@@ -239,7 +249,7 @@ async function getRecentAgents(limit = RECENT_AGENT_LIMIT): Promise<DashboardAge
       answerStyle: agent.answerStyle,
       status: agent.status,
       knowledgeBaseCount: scope.knowledgeBaseIds.length,
-      conversationCount: agent._count.conversations,
+      conversationCount: conversationCountByAgentId.get(agent.id) ?? 0,
       updatedAt: agent.updatedAt.toISOString(),
     };
   });
@@ -730,9 +740,10 @@ export async function getAnalyticsOverview() {
     getRecentKnowledge(RECENT_KNOWLEDGE_LIMIT),
     getSourceDistribution(),
     getRecentAgents(RECENT_AGENT_LIMIT),
-    prisma.agentConversation.groupBy({
+    prisma.chatConversation.groupBy({
       by: ["agentId"],
       where: {
+        agentId: { not: null },
         updatedAt: {
           gte: recentUsageStart,
         },
@@ -750,7 +761,7 @@ export async function getAnalyticsOverview() {
   ]);
 
   const topAgentGroup = topAgentUsageGroups[0];
-  const topAgentRecord = topAgentGroup
+  const topAgentRecord = topAgentGroup?.agentId
     ? await prisma.expertAgent.findUnique({
         where: {
           id: topAgentGroup.agentId,

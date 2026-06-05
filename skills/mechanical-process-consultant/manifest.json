@@ -1,0 +1,11 @@
+{
+  "id": "cmq0v78wc0005l0vg2xvee5qi",
+  "name": "机械产品工艺咨询专家",
+  "slug": "mechanical-process-consultant",
+  "version": "0.1.0",
+  "description": "基于机械产品工艺知识库，回答关于材料热处理、焊接工艺评定、切削参数等工艺问题，提供具体参数、步骤说明并引用知识库原文 Use when an agent needs to invoke the published HTTP API Skill, follow its input/output schema, or return knowledge-grounded answers with citations.",
+  "runtime": {
+    "type": "internal-skill",
+    "skillId": "cmq0v78wc0005l0vg2xvee5qi"
+  }
+}

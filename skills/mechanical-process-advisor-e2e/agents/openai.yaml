@@ -1,0 +1,3 @@
+display_name: "机械产品工艺顾问验证 Skill"
+short_description: "当用户询问机械产品制造工艺、加工步骤、工艺要求或工艺知识时使用，基于机械产品工艺知识库回答并返回引用。"
+default_prompt: "Use 机械产品工艺顾问验证 Skill to answer the user's request with the configured knowledge base and return citations when available."
