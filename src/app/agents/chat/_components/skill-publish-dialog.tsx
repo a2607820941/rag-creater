@@ -1,6 +1,6 @@
 "use client";
 
-import { Loader2 } from "lucide-react";
+import { Download, Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -30,6 +30,10 @@ export function SkillPublishDialog({
 }) {
   const published = state.status === "published" ? state : null;
   const skillPath = draft ? `skills/${draft.slug}/SKILL.md` : "";
+  const skillDir = draft ? `skills/${draft.slug}` : "";
+  const packageDownloadUrl = published
+    ? `/api/skills/${published.skill.id}/export-package?format=zip`
+    : "";
 
   return (
     <Dialog open={Boolean(draft)} onOpenChange={(open) => !open && onClose()}>
@@ -65,6 +69,46 @@ export function SkillPublishDialog({
             <div className="mt-1 break-all font-mono">{published.apiKey}</div>
             <div className="mt-1 text-amber-800">
               The server stores only the key hash. This plaintext key is shown once.
+            </div>
+          </div>
+        )}
+
+        {published && draft && (
+          <div className="rounded-md border border-slate-200 bg-white p-3 text-xs leading-6 text-slate-700">
+            <div className="flex items-center justify-between gap-3">
+              <div className="font-medium text-slate-950">Agent install package</div>
+              <Button asChild type="button" variant="outline" size="sm">
+                <a href={packageDownloadUrl} download>
+                  <Download data-icon="inline-start" />
+                  Download
+                </a>
+              </Button>
+            </div>
+            <div className="mt-3 grid gap-3">
+              <div>
+                <div className="font-medium text-slate-800">Codex</div>
+                <div className="mt-1 grid gap-1 font-mono text-[11px] leading-5 text-slate-600">
+                  <span>cd {skillDir}</span>
+                  <span>node scripts/install-skill.mjs codex</span>
+                </div>
+              </div>
+              <div>
+                <div className="font-medium text-slate-800">Claude Code</div>
+                <div className="mt-1 grid gap-1 font-mono text-[11px] leading-5 text-slate-600">
+                  <span>cd {skillDir}</span>
+                  <span>node scripts/install-skill.mjs claude-code</span>
+                </div>
+              </div>
+              <div>
+                <div className="font-medium text-slate-800">Runtime key</div>
+                <div className="mt-1 grid gap-1 break-all font-mono text-[11px] leading-5 text-slate-600">
+                  <span>node scripts/set-runtime-key.mjs &quot;{published.apiKey}&quot;</span>
+                  <span>export SKILL_API_KEY=&quot;{published.apiKey}&quot;</span>
+                </div>
+                <div className="mt-1 text-[11px] leading-5 text-slate-500">
+                  Use set-runtime-key for desktop or already-running agents. export only works for the current terminal process.
+                </div>
+              </div>
             </div>
           </div>
         )}

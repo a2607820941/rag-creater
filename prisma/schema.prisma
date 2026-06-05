@@ -339,6 +339,15 @@ model Skill {
   type   String @default("rag_agent")
   status String @default("draft")
 
+  taskDomain      String @default("general")
+  taskIntent      String @default("qa")
+  taskAudience    String @default("expert_agent")
+  taskDescription String @default("")
+  triggerExamples String @default("[]")
+  nonGoals        String @default("[]")
+  outputStyle     String @default("answer_with_citations")
+  runtimeMode     String @default("platform_rag")
+
   knowledgeScope String @default("{}")
   inputSchema    String @default("{}")
   outputSchema   String @default("{}")
@@ -356,6 +365,9 @@ model Skill {
   @@index([slug])
   @@index([status])
   @@index([type])
+  @@index([taskDomain])
+  @@index([taskIntent])
+  @@index([taskAudience])
   @@index([updatedAt])
 }
 

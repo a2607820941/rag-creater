@@ -16,6 +16,9 @@ export async function GET(request: NextRequest) {
       page: searchParams.get("page") ?? undefined,
       pageSize: searchParams.get("pageSize") ?? undefined,
       status: searchParams.get("status") ?? undefined,
+      taskDomain: searchParams.get("taskDomain") ?? undefined,
+      taskIntent: searchParams.get("taskIntent") ?? undefined,
+      taskAudience: searchParams.get("taskAudience") ?? undefined,
       keyword: searchParams.get("keyword") ?? undefined,
     });
 

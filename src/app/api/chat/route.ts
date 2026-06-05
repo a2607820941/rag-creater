@@ -425,7 +425,7 @@ async function streamSkillAgentChat(
     const draft = await findLatestSkillDraft(conversationId, recentMessages);
     if (!draft) {
       const answer =
-        "I did not find a valid Skill draft in the recent conversation. Please ask me to generate a Skill draft first, then reply with confirm/save.";
+        "I did not find a valid Skill draft in the recent conversation. Please ask me to generate a Skill draft first, then reply with 确认 or 保存.";
       send("token", answer);
       return { answer };
     }
@@ -464,7 +464,7 @@ Status: ${skill.status}
 Next steps:
 1. Test it with POST /api/skills/${skill.id}/test
 2. Publish it with POST /api/skills/${skill.id}/publish
-3. After publishing, external platforms can read /api/public/skills/${skill.slug}/manifest and call /api/public/skills/${skill.slug}/run with the one-time Bearer API key returned by publish.`;
+3. After publishing, Claude Code or Codex can read /api/public/skills/${skill.slug}/manifest and call /api/public/skills/${skill.slug}/run with the one-time Bearer API key returned by publish.`;
     send("token", answer);
     return { answer };
   }
@@ -844,12 +844,16 @@ function buildSkillAgentMessages(input: {
 
 Follow a skill-creator style workflow:
 1. Understand concrete examples first. Ask for 1-3 example user requests, caller platform, success criteria, expected input, expected output, and failure behavior.
-2. Plan reusable contents. Decide whether this Skill needs only an API manifest, or also Agent Skill Package resources such as references, scripts, or assets.
-3. Keep the core Skill concise. Do not stuff all knowledge into the prompt; bind explicit knowledgeBaseIds and rely on RAG at runtime.
-4. Set the right degree of freedom. Use schema and runtime rules for fragile API behavior; leave wording flexible when multiple answers are valid.
-5. Validate before save. Ensure slug naming, knowledge scope, input schema, output schema, trigger examples, and system prompt are clear.
-6. Include a machine-readable draft between <skill_draft> and </skill_draft>. The JSON must match the internal create Skill API.
-7. Tell the user to reply "confirm" or "save" only after they have reviewed the draft. Do not claim the Skill is saved until the user confirms.
+2. Define the task identity. Knowledge bases are resource dependencies; the task scenario is the Skill identity.
+3. Choose a corporate information system domain: hr, finance, legal, procurement, approval, workplace, security, privacy, compliance, aigc, or general.
+4. Choose the intent: qa, policy_check, process_guidance, case_triage, summary, drafting, or risk_review.
+5. Choose the audience: employee, manager, operator, admin, expert_agent, or external_agent.
+6. Plan reusable contents. Decide whether this Skill needs only an API manifest, or also Agent Skill Package resources such as references, scripts, or assets.
+7. Keep the core Skill concise. Do not stuff all knowledge into the prompt; bind explicit knowledgeBaseIds and rely on RAG at runtime.
+8. Set the right degree of freedom. Use schema and runtime rules for fragile API behavior; leave wording flexible when multiple answers are valid.
+9. Validate before save. Ensure slug naming, task scenario, knowledge scope, input schema, output schema, trigger examples, non-goals, and system prompt are clear.
+10. Include a machine-readable draft between <skill_draft> and </skill_draft>. The JSON must match the internal create Skill API.
+11. Tell the user to reply "确认" or "保存" only after they have reviewed the draft. English "confirm" or "save" is also accepted, but Chinese confirmation should be shown first. Do not claim the Skill is saved until the user confirms.
 
 When information is missing, ask targeted questions instead of inventing production details.
 Never default to all knowledge bases. Ask the user to choose one or more knowledgeBaseIds from the list.
@@ -864,6 +868,18 @@ The draft JSON shape:
   "description": "What this API Skill does",
   "type": "rag_agent",
   "status": "draft",
+  "taskDomain": "general",
+  "taskIntent": "qa",
+  "taskAudience": "external_agent",
+  "taskDescription": "Concrete enterprise workflow this Skill handles. Mention the domain, audience, expected decisions or outputs, and evidence boundaries.",
+  "triggerExamples": [
+    "Example request that should use this Skill"
+  ],
+  "nonGoals": [
+    "Example request that should not use this Skill"
+  ],
+  "outputStyle": "answer_with_citations",
+  "runtimeMode": "platform_rag",
   "knowledgeScope": {
     "mode": "knowledgeBases",
     "knowledgeBaseIds": ["selected knowledge base id"],
@@ -887,11 +903,16 @@ The draft JSON shape:
     }
   },
   "config": {
-    "triggerExamples": ["Example request that should use this Skill"],
-    "callerPlatforms": ["External platform or agent that will call it"],
+    "callerPlatforms": ["claude-code", "codex"],
+    "testExamples": [
+      {
+        "input": { "question": "Representative request that should use this Skill" },
+        "expected": "Knowledge-grounded answer with citations, or a clear missing-evidence response"
+      }
+    ],
     "packageResources": {
-      "references": ["api.md", "knowledge-scope.md"],
-      "scripts": [],
+      "references": ["api.md", "task-scenario.md", "examples.md", "runtime.md", "knowledge-scope.md"],
+      "scripts": ["run-skill.mjs"],
       "assets": []
     }
   },
