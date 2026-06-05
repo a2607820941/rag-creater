@@ -291,37 +291,41 @@ export async function parseFileContent(
     }
 
     case "docx": {
-      const images: DocImage[] = [];
+      const images: { idx: number; buffer: Buffer; mimeType: string; placeholder: string }[] = [];
       const result = await (mammoth as unknown as { convertToMarkdown: typeof mammoth.convertToHtml }).convertToMarkdown(
         { buffer },
-        onImage
-          ? {
-              convertImage: mammoth.images.imgElement(
-                async (image: { contentType: string; readAsBase64String: () => Promise<string>; readAsBuffer: () => Promise<Buffer> }) => {
-                  const idx = images.length;
-                  const placeholder = `__DOCX_IMAGE_${idx}__`;
-                  const imgBuffer = await image.readAsBuffer();
-                  images.push({
-                    index: idx,
-                    buffer: imgBuffer,
-                    mimeType: image.contentType,
-                    placeholder,
-                  });
-                  return { src: placeholder };
-                }
-              ),
+        {
+          convertImage: mammoth.images.imgElement(
+            async (image: { contentType: string; readAsBuffer: () => Promise<Buffer> }) => {
+              const idx = images.length;
+              const placeholder = `__DOCX_IMAGE_${idx}__`;
+              const imgBuffer = await image.readAsBuffer();
+              images.push({ idx, buffer: imgBuffer, mimeType: image.contentType, placeholder });
+              return { src: placeholder };
             }
-          : undefined
+          ),
+        }
       );
+
       let text = result.value;
-      // Replace markdown image refs with readable placeholders
-      for (const img of images) {
-        text = text.replace(
-          `![](${img.placeholder})`,
-          `[Image ${img.index + 1}: pending description]`
-        );
-        onImage?.(img);
+
+      // Replace image placeholders with Vision API descriptions synchronously
+      if (images.length > 0) {
+        const { chatWithVision } = await import("@/lib/ai-extract");
+        const { IMAGE_DESCRIPTION_PROMPT } = await import("@/lib/prompts/extraction");
+        const descs = await Promise.all(images.map(async (img) => {
+          try {
+            const desc = await chatWithVision(img.buffer, img.mimeType, IMAGE_DESCRIPTION_PROMPT);
+            return { placeholder: img.placeholder, text: `[Image ${img.idx + 1}: ${desc.slice(0, 500)}]` };
+          } catch {
+            return { placeholder: img.placeholder, text: `[Image ${img.idx + 1}: could not describe]` };
+          }
+        }));
+        for (const d of descs) {
+          text = text.replace(`![](${d.placeholder})`, d.text);
+        }
       }
+
       return text;
     }
 
@@ -329,29 +333,60 @@ export async function parseFileContent(
       const { PDFParse } = await import("pdf-parse");
       const parser = new PDFParse({ data: buffer });
 
-      const [textResult, tableResult, imageResult] = await Promise.all([
-        parser.getText({ pageJoiner: "" }),
-        parser.getTable().catch(() => null),
-        parser.getImage({ imageThreshold: 100 }).catch(() => null),
-      ]);
+      const textResult = await parser.getText({ pageJoiner: "" });
 
-      // Build per-page lookup for tables and images
+      let tableResult = null;
+      try { tableResult = await parser.getTable(); } catch { /* non-fatal */ }
+
+      let imageResult = null;
+      try { imageResult = await parser.getImage({ imageThreshold: 0 }); } catch { /* non-fatal */ }
+
       const pageTables = new Map();
       if (tableResult?.pages) {
-        for (const p of tableResult.pages) {
-          pageTables.set(p.num, p.tables);
-        }
+        for (const p of tableResult.pages) pageTables.set(p.num, p.tables);
       }
-
       const pageImages = new Map();
       if (imageResult?.pages) {
-        for (const p of imageResult.pages) {
-          pageImages.set(p.pageNumber, p.images);
+        for (const p of imageResult.pages) pageImages.set(p.pageNumber, p.images);
+      }
+
+      // Describe images synchronously before chunking
+      let imgIdx = 0;
+      const imgDescs = new Map<number, string[]>();
+      if (imageResult && imageResult.total > 0) {
+        type PendingImg = { pageNum: number; buf: Buffer; mime: string };
+        const allImgs: PendingImg[] = [];
+        for (const page of imageResult.pages) {
+          for (const img of page.images) {
+            if (!img.data) continue;
+            const mimeMatch = img.dataUrl?.match(/data:(image\/[^;]+);/);
+            allImgs.push({ pageNum: page.pageNumber, buf: Buffer.from(img.data), mime: mimeMatch?.[1] ?? "image/png" });
+          }
+        }
+
+        if (allImgs.length > 0) {
+          const { chatWithVision } = await import("@/lib/ai-extract");
+          const { IMAGE_DESCRIPTION_PROMPT } = await import("@/lib/prompts/extraction");
+          const results = await Promise.all(allImgs.map(async (img, i) => {
+            const num = imgIdx + i + 1;
+            try {
+              const desc = await chatWithVision(img.buf, img.mime, IMAGE_DESCRIPTION_PROMPT);
+              return `[Image ${num}: ${desc.slice(0, 500)}]`;
+            } catch {
+              return `[Image ${num}: could not describe]`;
+            }
+          }));
+
+          for (let i = 0; i < results.length; i++) {
+            const pageNum = allImgs[i].pageNum;
+            if (!imgDescs.has(pageNum)) imgDescs.set(pageNum, []);
+            imgDescs.get(pageNum)!.push(results[i]);
+            imgIdx++;
+          }
         }
       }
 
-      // Build output page by page — images land where they appear, not at the end
-      let imageIdx = 0;
+      // Build output page by page
       const parts: string[] = [];
       for (const page of textResult.pages) {
         parts.push(page.text);
@@ -361,30 +396,13 @@ export async function parseFileContent(
           for (let t = 0; t < tables.length; t++) {
             const table = tables[t];
             if (table && table.length >= 2) {
-              parts.push(
-                `**Page ${page.num} Table ${t + 1}**\n\n${rowsToMarkdownTable(table)}`
-              );
+              parts.push(`**Page ${page.num} Table ${t + 1}**\n\n${rowsToMarkdownTable(table)}`);
             }
           }
         }
 
-        const images = pageImages.get(page.num);
-        if (images && onImage) {
-          for (const img of images) {
-            if (!img.data) continue;
-            const mimeMatch = img.dataUrl?.match(/data:(image\/[^;]+);/);
-            const mimeType = mimeMatch?.[1] ?? "image/png";
-            const placeholder = `__PDF_IMAGE_${imageIdx}__`;
-            parts.push(`\n\n[Image ${imageIdx + 1}: pending description]`);
-            onImage({
-              index: imageIdx,
-              buffer: Buffer.from(img.data),
-              mimeType,
-              placeholder,
-            });
-            imageIdx++;
-          }
-        }
+        const descs = imgDescs.get(page.num);
+        if (descs) parts.push(...descs);
       }
 
       await parser.destroy();
@@ -426,8 +444,8 @@ export async function parseFileContent(
           parts.push(`## Slide ${i + 1}`);
         }
 
-        // Extract slide images via relationship lookup
-        if (onImage) {
+        // Extract and describe slide images synchronously
+        {
           const relsPath = `ppt/slides/_rels/slide${slideNum}.xml.rels`;
           const relsFile = zip.files[relsPath];
           if (relsFile) {
@@ -441,6 +459,8 @@ export async function parseFileContent(
                 relMap.set(relId, target);
               }
 
+              type SlideImg = { buf: Buffer; mime: string; idx: number };
+              const imgs: SlideImg[] = [];
               for (const [, embedId] of blips) {
                 const target = relMap.get(embedId);
                 if (!target) continue;
@@ -449,23 +469,29 @@ export async function parseFileContent(
                   : `ppt/media/${target}`;
                 const mediaFile = zip.files[mediaPath];
                 if (!mediaFile) continue;
-
-                const imgBuffer = await mediaFile.async("nodebuffer");
                 const ext = target.split(".").pop()?.toLowerCase() ?? "png";
-                const mimeType =
-                  ext === "jpg" || ext === "jpeg" ? "image/jpeg"
-                  : ext === "webp" ? "image/webp"
-                  : ext === "bmp" ? "image/bmp"
-                  : "image/png";
-                const placeholder = `__PPTX_IMAGE_${imageIdx}__`;
-                parts.push(`\n\n[Image ${imageIdx + 1}: pending description]`);
-                onImage({
-                  index: imageIdx,
-                  buffer: imgBuffer as Buffer,
-                  mimeType,
-                  placeholder,
+                imgs.push({
+                  idx: imageIdx++,
+                  buf: await mediaFile.async("nodebuffer") as Buffer,
+                  mime: ext === "jpg" || ext === "jpeg" ? "image/jpeg"
+                    : ext === "webp" ? "image/webp"
+                    : ext === "bmp" ? "image/bmp"
+                    : "image/png",
                 });
-                imageIdx++;
+              }
+
+              if (imgs.length > 0) {
+                const { chatWithVision } = await import("@/lib/ai-extract");
+                const { IMAGE_DESCRIPTION_PROMPT } = await import("@/lib/prompts/extraction");
+                const results = await Promise.all(imgs.map(async (img) => {
+                  try {
+                    const desc = await chatWithVision(img.buf, img.mime, IMAGE_DESCRIPTION_PROMPT);
+                    return `[Image ${img.idx + 1}: ${desc.slice(0, 500)}]`;
+                  } catch {
+                    return `[Image ${img.idx + 1}: could not describe]`;
+                  }
+                }));
+                parts.push(...results);
               }
             }
           }

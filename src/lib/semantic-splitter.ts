@@ -75,7 +75,7 @@ export async function splitTextSemantic(
 
     // 动态阈值：30% 分位
     const sorted = [...similarities].sort((a, b) => a - b);
-    const dynamicThreshold = sorted[Math.floor(sorted.length * 0.3)];
+    const dynamicThreshold = sorted[Math.floor(sorted.length * 0.4)];
 
     // 语义断点 + 标题强制切断
     const breakpoints = new Set<number>();
@@ -183,29 +183,52 @@ function mergeTableBlocks(sentences: string[]): string[] {
 }
 
 /**
- * 拆句策略（通用，不过拟合）：
- * 1. 先按空行（\n\n+）切成段落 — 这才是真正的结构边界
- * 2. 段落内长于 300 字的，按句末标点（。！？.!?）再拆分
- * 3. 单个 \n（换行不空行）保留在句子内部，不切断
- * 4. 合并孤立序号、合并表格块
+ * 拆句策略：
+ * 1. 按 \n 切行，非句末标点结尾的行合并到下一行（处理无空行的段落）
+ * 2. 长段落（>300字）按句末标点再拆分
+ * 3. 合并孤立序号前缀
+ * 4. 合并表格块
+ *
+ * 大多数文档段落之间只有单个 \n 没有空行，单纯按 \n\n+ 切会导致整篇文档
+ * 变成一个巨型段落。改为先按 \n 切行，再根据句末标点判断是否合并——
+ * 以 。！？.!? 结尾的行视为段落/句子边界，否则合并到下一行。
  */
-function splitSentences(text: string): string[] {
-  // 第一步：按空行切段落
-  const paragraphs = text.split(/\n\s*\n/).map((p) => p.trim()).filter((p) => p.length > 0);
+const SENTENCE_END = /[。！？.!?]$/;
+/** A line short enough that it likely starts a new topic (title, list item, table row) */
+const SHORT_LINE = 60;
 
-  // 第二步：长段落按句末标点拆分
+function splitSentences(text: string): string[] {
+  // 第一步：按 \n 切行，合并非句末标点结尾的连续行。
+  // 合并条件: 前一行不以句末标点结尾 且 前一行不太短（短行如标题列表项应作为边界）
+  const lines = text.split(/\n/).map((l) => l.trim()).filter((l) => l.length > 0);
   const raw: string[] = [];
-  for (const para of paragraphs) {
-    if (para.length <= 300) {
-      raw.push(para);
+  let buf = "";
+  for (const line of lines) {
+    if (!buf) {
+      buf = line;
+    } else if (SENTENCE_END.test(buf) || buf.length < SHORT_LINE) {
+      // Previous buf is a complete sentence OR a short standalone line → boundary
+      raw.push(buf);
+      buf = line;
     } else {
-      // 先按中文标点和换行切，再按英文句末切
+      // Previous buf does NOT end with sentence punctuation AND is not short → merge
+      buf += "\n" + line;
+    }
+  }
+  if (buf) raw.push(buf);
+
+  // 第二步：长段落按句末标点再拆分
+  const split: string[] = [];
+  for (const para of raw) {
+    if (para.length <= 300) {
+      split.push(para);
+    } else {
       const sub = para
         .split(/(?<=[。！？])\s*/u)
         .flatMap((s) => s.split(/(?<!\d)(?<=[.!?])\s+(?=[A-Z一-鿿])/u))
         .map((s) => s.trim())
         .filter((s) => s.length > 0);
-      raw.push(...sub);
+      split.push(...sub);
     }
   }
 
@@ -214,12 +237,12 @@ function splitSentences(text: string): string[] {
   const ISOLATED_PREFIX =
     /^\s*(?:\d+[.\)、]\s*|[a-zA-Z][.)]\s*|[一二三四五六七八九十]+[、.]\s*|[-•·①-⑳]\s*)$/;
 
-  for (let i = 0; i < raw.length; i++) {
-    if (ISOLATED_PREFIX.test(raw[i]) && i + 1 < raw.length) {
-      merged.push(raw[i] + raw[i + 1]);
+  for (let i = 0; i < split.length; i++) {
+    if (ISOLATED_PREFIX.test(split[i]) && i + 1 < split.length) {
+      merged.push(split[i] + split[i + 1]);
       i++;
     } else {
-      merged.push(raw[i]);
+      merged.push(split[i]);
     }
   }
 

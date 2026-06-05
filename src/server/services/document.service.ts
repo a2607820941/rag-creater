@@ -85,31 +85,58 @@ async function processDocumentImages(
     })
   );
 
-  // Update rawContent with image descriptions
-  const doc = await prisma.documentSource.findUnique({
-    where: { id: documentId },
-    select: { rawContent: true },
-  });
-
-  if (doc?.rawContent) {
-    let updatedContent = doc.rawContent;
-    for (const result of results) {
-      if (result.status === "fulfilled") {
-        updatedContent = updatedContent.replace(
-          `[Image ${images.find((i) => i.placeholder === result.value.placeholder)!.index + 1}: pending description]`,
+  // Build replacement map
+  const replacements = new Map<string, string>();
+  for (const result of results) {
+    if (result.status === "fulfilled") {
+      const img = images.find((i) => i.placeholder === result.value.placeholder);
+      if (img) {
+        replacements.set(
+          `[Image ${img.index + 1}: pending description]`,
           `[Image: ${result.value.description.slice(0, 500)}]`
         );
       }
     }
-
-    await prisma.documentSource.update({
-      where: { id: documentId },
-      data: { rawContent: updatedContent },
-    });
-
-    // Re-index to include image descriptions
-    await reindexRetrievableDocumentChunks(documentId);
   }
+
+  if (replacements.size === 0) return;
+
+  function applyReplacements(text: string): string {
+    for (const [from, to] of replacements) {
+      text = text.replace(from, to);
+    }
+    return text;
+  }
+
+  const doc = await prisma.documentSource.findUnique({
+    where: { id: documentId },
+    select: { rawContent: true },
+  });
+  if (!doc?.rawContent) return;
+
+  // Update rawContent
+  const updatedRaw = applyReplacements(doc.rawContent);
+  await prisma.documentSource.update({
+    where: { id: documentId },
+    data: { rawContent: updatedRaw },
+  });
+
+  // Update chunk contents — frontend shows these, not just rawContent
+  const chunks = await prisma.documentChunk.findMany({
+    where: { documentSourceId: documentId },
+    select: { id: true, content: true },
+  });
+  for (const chunk of chunks) {
+    const updatedChunk = applyReplacements(chunk.content);
+    if (updatedChunk !== chunk.content) {
+      await prisma.documentChunk.update({
+        where: { id: chunk.id },
+        data: { content: updatedChunk },
+      });
+    }
+  }
+
+  await reindexRetrievableDocumentChunks(documentId);
 }
 
 async function listDocumentRagChunksForIndex(documentSourceId: string) {
@@ -480,7 +507,7 @@ export async function parseDocument(
     // Async image processing — fire and forget
     if (docImages.length > 0) {
       processDocumentImages(id, docImages).catch((err) =>
-        console.error("Async image processing failed:", err)
+        console.error("Async image processing failed:", err instanceof Error ? err.message : err)
       );
     }
 
