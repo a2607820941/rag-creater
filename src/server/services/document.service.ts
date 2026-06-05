@@ -28,6 +28,7 @@ import {
   deleteChunkEmbeddings,
   indexChunks,
 } from "@/server/services/rag/vector-index-repository";
+import { upsertDocumentKnowledgeMap } from "@/server/services/knowledge-agent/knowledge-map";
 import type {
   CreateDocumentChunkInput,
   CreateDocumentSourceInput,
@@ -272,6 +273,13 @@ export async function replaceTextChunksAndIndex(
         },
       }),
     ]);
+
+    await upsertDocumentKnowledgeMap(documentSourceId).catch((error) => {
+      console.warn(
+        "Failed to update document knowledge map:",
+        error instanceof Error ? error.message : error
+      );
+    });
   } catch (error) {
     await deleteChunkEmbeddings(indexedChunkIds);
     await prisma.$transaction([
@@ -768,7 +776,7 @@ export async function updateDocumentSourceService(
   try {
     const currentDocument = await prisma.documentSource.findUnique({
       where: { id },
-      select: { title: true },
+      select: { title: true, rawContent: true },
     });
     if (!currentDocument) throw notFound("document not found");
 
@@ -805,6 +813,20 @@ export async function updateDocumentSourceService(
         },
       },
     });
+
+    if (
+      input.rawContent !== undefined &&
+      input.rawContent !== currentDocument.rawContent &&
+      document.status === "parsed" &&
+      document.activeStatus === "active"
+    ) {
+      await upsertDocumentKnowledgeMap(id).catch((error) => {
+        console.warn("Failed to refresh document knowledge map", {
+          documentSourceId: id,
+          error,
+        });
+      });
+    }
 
     if (
       input.title !== undefined &&
