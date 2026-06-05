@@ -70,6 +70,38 @@ Responsibilities:
 
 The chat route should delegate Knowledge Agent mode to this executor and keep only request orchestration, SSE emission, persistence, and error handling.
 
+## Executor Interface
+
+The executor must preserve the current chat behavior: intermediate planning/tool calls may be non-streaming, but the final answer must stream tokens through the existing SSE path.
+
+Recommended public interface:
+
+```ts
+type RunKnowledgeAgentInput = {
+  userMessage: string;
+  attachmentIds?: string[];
+  llmInterface?: LlmInterfaceKey;
+  recentMessages: LlmMessage[];
+  memorySummary: string | null;
+  signal?: AbortSignal;
+  emit: ChatStreamEmitter;
+};
+
+type RunKnowledgeAgentResult = {
+  answer: string;
+  knowledgeFiles: Array<{ id: string; title: string; chunkCount: number }>;
+  citations: ChatCitation[];
+};
+```
+
+Execution rules:
+
+- Planning and tool-selection turns use non-streaming `createChatCompletion`.
+- Tool results are appended to the message list as text messages.
+- The final answer turn uses `streamChatCompletion` and calls `emit("token", token)` for each token.
+- The executor returns the accumulated final `answer` only after streaming completes, so the caller can persist the exchange.
+- The initial messages must be built with the existing conversation context behavior: attachment context, image parts, `mergeRecentMessages`, and `memorySummary` must remain part of the prompt assembly.
+
 ## Data Model
 
 Add a persisted document knowledge map instead of continuing to expand `DocumentSource`.
@@ -95,6 +127,15 @@ model DocumentKnowledgeMap {
 ```
 
 The map should be generated after document parsing succeeds. If a document does not yet have a persisted map, the Knowledge Agent should fall back to a deterministic summary from `rawContent` and chunk metadata.
+
+Generation should be attached to the existing document parsing pipeline:
+
+- `src/app/api/documents/[id]/parse/route.ts` calls `parseDocument`.
+- `src/app/api/documents/batch-parse/route.ts` calls `parseDocument` for each selected document.
+- `parseDocument` delegates successful chunk replacement and indexing to `replaceTextChunksAndIndex`.
+- `replaceTextChunksAndIndex` is the preferred trigger point because it also covers manual content/chunk replacement flows that re-index the document.
+
+The first implementation should generate the map synchronously after chunks are saved and indexed successfully. If map generation fails, parsing should still succeed and the error should be logged; the Knowledge Agent can fall back to deterministic summaries. A later background job can backfill or refresh maps without blocking document ingestion.
 
 `signalsJson` should include review-oriented metadata such as:
 
@@ -144,6 +185,12 @@ Input:
 }
 ```
 
+Limit rules:
+
+- default: 50
+- maximum: 100
+- values above 100 are rejected by Zod validation rather than silently expanded
+
 Output:
 
 - document id
@@ -183,6 +230,7 @@ Limits:
 
 - maximum 5 files per call for `full`
 - maximum 30 chunks per call for `chunks`
+- default limit 10 for `summary` and `chunks`
 - maximum 20,000 returned characters per round
 - maximum 60,000 returned characters across the whole loop
 
@@ -203,7 +251,7 @@ Input:
 Behavior:
 
 - For `knowledgeBase`, convert scope directly to `RagRetrieveScope`.
-- For `files`, pass selected document ids as `knowledgeIds`.
+- For `files`, selected ids are `DocumentSource.id` values. The current RAG adapter maps `RagRetrieveScope.knowledgeIds` to `DocumentChunk.documentSourceId`, so the first implementation can pass these ids as `knowledgeIds`. This contract must be documented in the tool schema and tested. If the RAG type is later renamed, use `documentSourceIds` to make the meaning explicit.
 - For `all`, resolve active knowledge bases first, then call `retrieveRagContexts`.
 
 This tool should return citations-compatible chunk references so final answers can point back to evidence.
@@ -236,6 +284,9 @@ Loop rules:
 - Tool input must be parsed as JSON and validated with Zod.
 - Tool failures are returned to the model as tool-result messages, not thrown as final request failures unless the executor cannot continue.
 - The executor stops when the model emits `<|Final|>`, emits a normal answer without an action, or reaches loop limits.
+- `tool-loop.ts` owns the cross-round character budget. Each tool result must report `returnedCharCount`, `remainingRoundBudget`, and `remainingTotalBudget`.
+- When total budget is exhausted, tools return a structured budget-exhausted result. They must not return empty content without explanation.
+- The loop should ask the model to finalize from gathered evidence after budget exhaustion instead of continuing to call tools.
 
 ## Prompt Design
 
@@ -283,6 +334,20 @@ The first version can store the natural-language answer plus `knowledgeFilesJson
 
 Update Knowledge Agent mode in `src/app/api/chat/route.ts` so it calls the new executor.
 
+The executor should receive the current chat context:
+
+```ts
+{
+  userMessage: string;
+  attachmentIds?: string[];
+  llmInterface?: LlmInterfaceKey;
+  recentMessages: LlmMessage[];
+  memorySummary: string | null;
+  signal?: AbortSignal;
+  emit: ChatStreamEmitter;
+}
+```
+
 The executor should return:
 
 ```ts
@@ -301,6 +366,13 @@ SSE events should continue to use existing event names where possible:
 - `citations`: emit chunk-level evidence returned by `search_chunks`.
 
 No new frontend route is required for the first version.
+
+The existing `src/server/services/knowledge-agent-document.service.ts` should not remain as a parallel implementation. During migration, either:
+
+- move reusable functions into the new `knowledge-agent` service directory and delete the old service after imports are updated, or
+- keep the old file as a thin compatibility wrapper that re-exports the new implementation.
+
+The preferred outcome is one implementation path under `src/server/services/knowledge-agent/`.
 
 ## Error Handling
 
