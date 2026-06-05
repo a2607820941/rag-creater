@@ -11,7 +11,6 @@ import {
   createChatCompletion,
   type LlmMessage,
 } from "@/server/services/agent/llm-client";
-import type { KnowledgeFile } from "@/server/services/knowledge-agent-document.service";
 
 const RECENT_CHAT_MESSAGE_LIMIT = 8;
 const MEMORY_CONTEXT_WINDOW_TOKENS = 8000;
@@ -170,7 +169,7 @@ export async function persistChatExchange(input: {
   userMessage: string;
   assistantMessage: string;
   citations?: ChatCitation[];
-  knowledgeFiles?: KnowledgeFile[];
+  knowledgeFiles?: ChatKnowledgeFile[];
 }): Promise<{ userMessageId: string; assistantMessageId: string }> {
   return prisma.$transaction(async (tx) => {
     const userMessage = await tx.chatMessage.create({
