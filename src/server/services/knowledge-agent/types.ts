@@ -54,7 +54,7 @@ export type RetrieveFilesInput = z.infer<typeof retrieveFilesInputSchema>;
 export type SearchChunksInput = z.infer<typeof searchChunksInputSchema>;
 
 export type KnowledgeAgentToolResult = {
-  toolName: KnowledgeAgentToolName;
+  toolName: KnowledgeAgentToolName | "unknown";
   ok: boolean;
   content: string;
   returnedCharCount: number;
@@ -73,6 +73,12 @@ export type ParsedKnowledgeAgentAction =
       kind: "action";
       name: KnowledgeAgentToolName;
       input: unknown;
+    }
+  | {
+      kind: "invalid_action";
+      name: string;
+      input: unknown;
+      reason: string;
     }
   | {
       kind: "final";
