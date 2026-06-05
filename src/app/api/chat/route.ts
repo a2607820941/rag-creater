@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { directChatRequestSchema } from "@/features/chat/chat.validation";
 import type {
   ChatCitation,
+  ChatKnowledgeFile,
   ChatRagSummary,
   ChatStreamStatus,
 } from "@/features/chat/chat.types";
@@ -29,15 +30,8 @@ import {
   shouldUseRagForMessage,
 } from "@/server/services/rag/gating";
 import { retrieveRagContexts } from "@/server/services/rag/retriever";
+import { runKnowledgeAgent as runKnowledgeAgentExecutor } from "@/server/services/knowledge-agent/executor";
 import {
-  buildKnowledgeDocumentMap,
-  formatKnowledgeDocumentToolResult,
-  retrieveKnowledgeDocuments,
-  type KnowledgeFile,
-  type KnowledgeDocumentToolInput,
-} from "@/server/services/knowledge-agent-document.service";
-import {
-  createChatCompletion,
   streamChatCompletion,
   type LlmContentPart,
   type LlmMessage,
@@ -104,13 +98,15 @@ export async function POST(request: NextRequest) {
                 request.signal
               ),
             runKnowledgeAgent: () =>
-              streamKnowledgeAgentChat(
-                parsed.data,
-                emit,
+              runKnowledgeAgentExecutor({
+                userMessage: parsed.data.message,
+                attachmentIds: parsed.data.attachmentIds,
+                llmInterface: parsed.data.llmInterface,
                 recentMessages,
                 memorySummary,
-                request.signal
-              ),
+                signal: request.signal,
+                emit,
+              }),
             prepareDirectChat: () =>
               prepareDirectChat(
                 parsed.data,
@@ -280,129 +276,6 @@ async function prepareDirectChat(
   };
 }
 
-async function streamKnowledgeAgentChat(
-  input: {
-    message: string;
-    attachmentIds?: string[];
-    llmInterface?: "default" | "openai" | "local";
-  },
-  send: ChatStreamEmitter,
-  recentMessages: LlmMessage[],
-  memorySummary: string | null,
-  signal?: AbortSignal
-): Promise<{ answer: string; knowledgeFiles: KnowledgeFile[] }> {
-  const [attachmentContext, imageParts] = await Promise.all([
-    buildAttachmentPromptContext(input.attachmentIds),
-    buildAttachmentImageParts(input.attachmentIds),
-  ]);
-  const documentMap = await buildKnowledgeDocumentMap();
-  emitTrace(send, {
-    type: "plan",
-    title: "Map available documents",
-    detail: "Build a list of imported knowledge documents for the agent.",
-    status: "completed",
-  });
-  const probeMessages = attachImagesToCurrentUserMessage(
-    mergeRecentMessages(
-      buildKnowledgeAgentMessages({
-        userMessage: input.message,
-        attachmentContext,
-        documentMap: documentMap.text,
-      }),
-      recentMessages,
-      memorySummary
-    ),
-    imageParts
-  );
-
-  send("rag-summary", {
-    status: "not-applicable",
-    citationCount: 0,
-  });
-  send("citations", []);
-  send("status", { status: "organizing" } satisfies {
-    status: ChatStreamStatus;
-  });
-
-  const llmInterface = input.llmInterface ?? "openai";
-  emitTrace(send, {
-    type: "plan",
-    title: "Ask agent to choose files",
-    detail: "The model decides whether a retrieve_files action is needed.",
-    status: "running",
-  });
-  const firstResponse = await createChatCompletion(probeMessages, llmInterface, {
-    signal,
-  });
-  const toolInput = parseRetrieveFilesAction(firstResponse);
-
-  if (!toolInput) {
-    emitTrace(send, {
-      type: "generation",
-      title: "Direct answer",
-      detail: "The agent answered without reading additional files.",
-      status: "completed",
-    });
-    send("status", { status: "generating" } satisfies {
-      status: ChatStreamStatus;
-    });
-    send("token", firstResponse);
-    return { answer: firstResponse, knowledgeFiles: [] };
-  }
-
-  send("status", { status: "reading-documents" } satisfies {
-    status: ChatStreamStatus;
-  });
-  emitTrace(send, {
-    type: "retrieval",
-    title: "Read selected files",
-    detail: `${toolInput.documents.length} file request(s) from retrieve_files.`,
-    status: "running",
-  });
-  const toolResult = await retrieveKnowledgeDocuments(toolInput);
-  const knowledgeFiles = toolResult.files.map((file) => ({
-    id: file.id,
-    title: file.title,
-    chunkCount: file.chunkCount,
-  }));
-  send(
-    "knowledge-files",
-    knowledgeFiles
-  );
-  emitTrace(send, {
-    type: "evidence",
-    title: "Selected file evidence",
-    detail: `${knowledgeFiles.length} file(s) loaded for the final answer.`,
-    status: "completed",
-  });
-
-  const finalMessages: LlmMessage[] = [
-    ...probeMessages,
-    {
-      role: "assistant",
-      content: firstResponse,
-    },
-    {
-      role: "user",
-      content: `${formatKnowledgeDocumentToolResult(toolResult)}
-
-请基于上面的 retrieve_files 工具结果回答用户原始问题。不要再次输出 <|Action|>，也不要声称读取了正式知识库或向量检索结果。`,
-    },
-  ];
-
-  send("status", { status: "generating" } satisfies {
-    status: ChatStreamStatus;
-  });
-  const answer = await streamChatCompletion(
-    finalMessages,
-    (token) => send("token", token),
-    llmInterface,
-    { signal }
-  );
-
-  return { answer, knowledgeFiles };
-}
-
 async function streamSkillAgentChat(
   input: {
     message: string;
@@ -508,15 +381,15 @@ Next steps:
 
 async function getActiveAgent(agentId?: string) {
   if (!agentId) {
-    throw new Error("Agent 模式需要先创建并启用一个 Agent");
+    throw new Error("Agent mode requires an active Agent");
   }
 
   const agent = await prisma.expertAgent.findUnique({
     where: { id: agentId },
   });
 
-  if (!agent) throw new Error("Agent 不存在");
-  if (agent.status !== "active") throw new Error("Agent 未启用");
+  if (!agent) throw new Error("Agent not found");
+  if (agent.status !== "active") throw new Error("Agent is not active");
   return agent;
 }
 
@@ -618,7 +491,7 @@ async function reportRagUsage(input: {
 
 async function reportKnowledgeAgentUsage(input: {
   query: string;
-  knowledgeFiles: KnowledgeFile[];
+  knowledgeFiles: ChatKnowledgeFile[];
 }) {
   try {
     const references = await buildKnowledgeAgentReferences(input.knowledgeFiles);
@@ -674,7 +547,7 @@ async function reportDirectChatUsage(input: {
   }
 }
 
-async function buildKnowledgeAgentReferences(knowledgeFiles: KnowledgeFile[]) {
+async function buildKnowledgeAgentReferences(knowledgeFiles: ChatKnowledgeFile[]) {
   if (knowledgeFiles.length === 0) return [];
 
   const documents = await prisma.documentSource.findMany({
@@ -740,53 +613,13 @@ function buildPlainChatMessages(
   return [
     {
       role: "system",
-      content: `你是一个通用 AI 助手。请直接回答用户问题。
+      content: `You are a general AI assistant. Answer the user directly.
 
 ${renderAttachmentInstruction(attachmentContext)}`,
     },
     {
       role: "user",
       content: userMessage,
-    },
-  ];
-}
-
-function buildKnowledgeAgentMessages(input: {
-  userMessage: string;
-  attachmentContext: string;
-  documentMap: string;
-}): LlmMessage[] {
-  return [
-    {
-      role: "system",
-      content: `你是一个 Knowledge Agent，负责帮助用户围绕知识库建设、知识消费、知识整理和知识问答策略进行对话。
-
-当前能力边界：
-1. 你当前只能读取“文档导入/解析”模块中已解析完成的导入文档。
-2. 你不能读取正式知识库、数据库表或向量检索结果，不要声称已经检索或引用了正式知识库。
-3. 如果用户的问题需要具体文档依据，请根据文档地图选择相关文档，并输出 retrieve_files 工具调用。
-4. 如果文档地图没有相关文档，请直接说明没有找到可读取依据，并建议用户先上传并解析文档。
-5. 如果本轮有附件内容，可以把附件作为当前对话上下文使用，但不要把附件说成已经进入知识库。
-6. 回答应偏向可执行方案，例如知识库结构、消费链路、Agent 设计、Prompt 设计、评估方式和落地步骤。
-
-可用文档地图：
-${input.documentMap}
-
-当你需要读取导入文档时，只输出以下格式，不要输出其他内容：
-<|Action|> retrieve_files
-<|Action Input|> {"documents":["documentId 或标题"]}
-
-工具调用限制：
-1. documents 最多 3 项。
-2. 优先使用文档地图中的 documentId。
-3. 读取工具返回结果后，再基于已读取内容回答。
-
-${renderAttachmentInstruction(input.attachmentContext)}
-`,
-    },
-    {
-      role: "user",
-      content: input.userMessage,
     },
   ];
 }
@@ -799,7 +632,7 @@ function buildAgentMessages(input: {
   return [
     {
       role: "system",
-      content: `${input.systemPrompt || "你是一个专业、可靠的专家 Agent。"}
+      content: `${input.systemPrompt || "You are a professional and reliable expert Agent."}
 
 ${renderAttachmentInstruction(input.attachmentContext)}`,
     },
@@ -828,7 +661,7 @@ ${knowledgeContext}
 Citation rules:
 1. When you use knowledge-base context, cite it with [ref_x].
 2. Put citation markers immediately after the supported clause, like conclusion[ref_1][ref_2].
-3. Do not wrap citation markers in parentheses or connect them with "and", "和", or "与".
+3. Do not wrap citation markers in parentheses or connect them with "and".
 4. Do not invent citation ids that are not present in the knowledge-base context.`;
 }
 
@@ -917,21 +750,21 @@ function buildRagOnlyMessages(
   return [
     {
       role: "system",
-      content: `你是一个基于知识库上下文回答问题的 AI 助手。
+      content: `You are an AI assistant answering with retrieved knowledge-base context.
 
 ${renderAttachmentInstruction(attachmentContext)}
 
-Citation format rule: put citation markers immediately after the supported clause, like conclusion[ref_1][ref_2]. Do not wrap citation markers in parentheses or connect them with "and", "和", or "与".
+Citation format rule: put citation markers immediately after the supported clause, like conclusion[ref_1][ref_2]. Do not wrap citation markers in parentheses or connect them with "and".
 
-知识库检索结果：
-${retrieve.llmContext || "未检索到相关知识。"}
+Knowledge-base retrieval result:
+${retrieve.llmContext || "No relevant knowledge-base context was retrieved."}
 
-要求：
-1. 优先理解用户问题和本轮附件内容。
-2. 涉及业务知识时，优先基于知识库检索结果回答。
-3. 如果使用某段知识库内容，请用 [ref_x] 标注引用。
-4. 如果知识库没有可靠依据，请明确说明没有找到可靠依据。
-5. 不要编造引用编号。`,
+Requirements:
+1. First understand the user question and any attachment context.
+2. For business knowledge, answer primarily from retrieved knowledge-base context.
+3. Cite used knowledge-base context with [ref_x].
+4. If no reliable context was found, say that clearly.
+5. Do not invent citation ids.`,
     },
     {
       role: "user",
@@ -942,15 +775,15 @@ ${retrieve.llmContext || "未检索到相关知识。"}
 
 function renderAttachmentInstruction(attachmentContext: string): string {
   if (!attachmentContext) {
-    return "本轮用户没有上传附件。";
+    return "No attachments were uploaded for this turn.";
   }
 
   return `${attachmentContext}
 
-附件使用规则：
-1. 当用户要求总结、解释、提取或分析附件时，优先使用附件内容。
-2. 附件内容只作为当前对话上下文，不代表已经进入业务知识库。
-3. 不要把附件内容标注为知识库引用来源。`;
+Attachment usage rules:
+1. Use attachment content first when the user asks to summarize, explain, extract, or analyze the attachment.
+2. Attachment content is only current conversation context and is not automatically part of the business knowledge base.
+3. Do not label attachment content as a knowledge-base citation source.`;
 }
 
 function toCitations(retrieve: RagRetrieveResponse): ChatCitation[] {
@@ -973,35 +806,6 @@ function toCitations(retrieve: RagRetrieveResponse): ChatCitation[] {
         score: context.score,
       };
     });
-}
-
-function parseRetrieveFilesAction(text: string): KnowledgeDocumentToolInput | null {
-  const actionMatch = text.match(/<\|Action\|>\s*retrieve_files/i);
-  if (!actionMatch) return null;
-
-  const inputMatch = text.match(
-    /<\|Action Input\|>\s*([\s\S]*?)(?:\n\s*<\||$)/
-  );
-  if (!inputMatch) return null;
-
-  try {
-    const parsed = JSON.parse(inputMatch[1].trim()) as unknown;
-    if (
-      !parsed ||
-      typeof parsed !== "object" ||
-      !Array.isArray((parsed as { documents?: unknown }).documents)
-    ) {
-      return null;
-    }
-
-    return {
-      documents: (parsed as { documents: unknown[] }).documents.filter(
-        (document): document is string => typeof document === "string"
-      ),
-    };
-  } catch {
-    return null;
-  }
 }
 
 function isSkillSaveConfirmation(message: string) {
