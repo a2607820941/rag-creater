@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git fetch *)",
+      "Bash(git checkout *)",
+      "Bash(git push *)",
+      "Bash(git pull *)",
+      "Bash(git log *)",
+      "Bash(npm run *)",
+      "Bash(git cherry-pick *)",
+      "Bash(git stash *)",
+      "Bash(npm install *)",
+      "WebSearch",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(cd /d E:\\\\D\\\\document\\\\工程营\\\\rag-creater)",
+      "Bash(node scripts/test-semantic-split.mjs)",
+      "Bash(node *)",
+      "Bash(git rm *)",
+      "Bash(npm uninstall *)"
+    ]
+  }
+}

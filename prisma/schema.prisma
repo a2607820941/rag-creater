@@ -1,0 +1,410 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model KnowledgeBase {
+  id          String  @id @default(cuid())
+  name        String  @unique
+  description String?
+
+  icon  String @default("Database")
+  color String @default("blue")
+
+  // Compatibility fields used by main branch UI/API. New RAG management stores
+  // chunk settings on DocumentSource.
+  chunkSize    Int @default(800)
+  chunkOverlap Int @default(100)
+
+  similarityThreshold Float @default(0.7)
+  topK                Int   @default(5)
+
+  status String @default("active")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  documents KnowledgeBaseDocument[]
+
+  @@index([status])
+}
+
+// DocumentSource is the unified document model, absorbing KnowledgeDocument.
+// It serves both the document import pipeline (upload → parse → extract) and
+// the RAG knowledge management pipeline (create → chunk → embed → retrieve).
+model DocumentSource {
+  id           String @id @default(cuid())
+  originalName String
+  title        String
+
+  // File metadata
+  fileType String @default("file")
+  fileName String?
+  fileUrl  String?
+  mimeType String?
+  fileSize Int
+
+  // Source tracking — origin of the document
+  sourceType String @default("manual") // manual | file | url | text | markdown | image
+
+  // Content
+  rawContent String?
+
+  // Chunking configuration
+  chunkSize    Int @default(800)
+  chunkOverlap Int @default(100)
+
+  // Processing pipeline status
+  //   uploading | uploaded | pending | parsing | parsed | failed
+  //   - uploading: file is being saved to disk
+  //   - uploaded:  file saved, ready for parse
+  //   - pending:   document created, awaiting content processing
+  //   - parsing:   currently being processed
+  //   - parsed:    content extracted and chunked
+  //   - failed:    processing failed
+  status String @default("uploading")
+
+  // Business operational status
+  activeStatus String @default("active") // active | disabled
+
+  // Error tracking
+  error String?
+
+  // Soft delete support for document restore
+  deletedAt DateTime?
+
+  // Denormalized chunk count for quick display
+  chunkCount Int @default(0)
+
+  // Legacy compatibility scalar — the canonical relation is KnowledgeBaseDocument
+  knowledgeBaseId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  knowledgeBases KnowledgeBaseDocument[]
+  chunks         DocumentChunk[]
+
+  @@index([knowledgeBaseId])
+  @@index([sourceType])
+  @@index([status])
+  @@index([activeStatus])
+}
+
+model KnowledgeBaseDocument {
+  id              String @id @default(cuid())
+  knowledgeBaseId String
+  documentId      String
+
+  status    String @default("active")
+  sortOrder Int    @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  knowledgeBase KnowledgeBase  @relation(fields: [knowledgeBaseId], references: [id], onDelete: Cascade)
+  document      DocumentSource @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([knowledgeBaseId, documentId])
+  @@index([knowledgeBaseId])
+  @@index([documentId])
+  @@index([status])
+}
+
+// DocumentChunk is the unified chunk model, absorbing KnowledgeChunk.
+// It includes embedding support for RAG retrieval and can hold both raw text
+// chunks (chunkType="text") and AI-extracted knowledge chunks (chunkType="knowledge").
+model DocumentChunk {
+  id               String @id @default(cuid())
+  documentSourceId String?
+
+  content    String
+  chunkIndex Int
+
+  // Character-level position in source document
+  charStart Int
+  charEnd   Int
+
+  // Embedding support (from KnowledgeChunk)
+  embedding String?
+
+  // Chunk type: "text" = mechanical split, "knowledge" = AI extracted
+  chunkType String @default("text")
+
+  // === Fields for knowledge-type chunks (absorbed from CandidateKnowledge) ===
+  title             String?  // AI extracted knowledge title
+  suggestedCategory String?  // AI suggested category name
+  suggestedTags     String?  // AI suggested tags (JSON array string)
+  knowledgeType     String?  // AI knowledge subtype: faq | concept | procedure | note | summary
+  reviewStatus      String?  // null(text) | "pending" | "confirmed" | "rejected" (knowledge)
+
+  // Operational status for RAG filtering
+  chunkStatus String @default("active") // active | disabled
+
+  // Track which KB this knowledge chunk was confirmed for
+  knowledgeBaseId String?
+
+  // Soft delete support for chunk restore
+  deletedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  documentSource DocumentSource? @relation(fields: [documentSourceId], references: [id], onDelete: Cascade)
+
+  @@index([documentSourceId])
+  @@index([chunkStatus])
+  @@index([chunkType])
+  @@index([reviewStatus])
+  @@index([knowledgeBaseId])
+  @@index([documentSourceId, chunkStatus])
+  @@index([documentSourceId, chunkIndex])
+}
+
+model ChunkEmbedding {
+  chunkId        String @id
+  embedding      String
+  embeddingModel String
+  contentHash    String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([embeddingModel])
+  @@index([contentHash])
+  @@index([updatedAt])
+}
+
+model KnowledgeCategory {
+  id          String  @id @default(cuid())
+  name        String  @unique
+  description String?
+  color       String?
+  sortOrder   Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([sortOrder])
+  @@index([createdAt])
+}
+
+model KnowledgeTag {
+  id        String  @id @default(cuid())
+  name      String  @unique
+  color     String?
+  sortOrder Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([sortOrder])
+  @@index([createdAt])
+}
+
+model ExpertAgent {
+  id          String  @id @default(cuid())
+  name        String
+  description String?
+
+  answerStyle    String @default("strict")
+  knowledgeScope String @default("{}")
+
+  showReferences        Boolean @default(true)
+  allowKnowledgeCapture Boolean @default(false)
+
+  status       String  @default("draft")
+  systemPrompt String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([answerStyle])
+  @@index([createdAt])
+}
+
+model ChatAttachment {
+  id       String @id @default(cuid())
+  fileName String
+  mimeType String
+  fileSize Int
+  fileType String
+  kind     String
+  filePath String
+
+  parsedText String?
+  status     String  @default("parsing")
+  error      String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([kind])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model ChatConversation {
+  id                    String  @id @default(cuid())
+  title                 String
+  mode                  String
+  agentId               String?
+  memorySummary         String?
+  memoryCursorMessageId String?
+  memoryFailureCount    Int     @default(0)
+  status                String  @default("active")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  messages ChatMessage[]
+
+  @@index([mode])
+  @@index([agentId])
+  @@index([status])
+  @@index([updatedAt])
+}
+
+model ChatMessage {
+  id                 String  @id @default(cuid())
+  conversationId     String
+  role               String
+  content            String
+  citationsJson      String?
+  knowledgeFilesJson String?
+
+  createdAt DateTime @default(now())
+
+  conversation ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+  @@index([createdAt])
+}
+
+model UsageLog {
+  id String @id @default(cuid())
+
+  source String @default("rag_retrieve")
+  query  String
+  mode   String @default("balanced")
+  scope  String
+
+  hitCount Int     @default(0)
+  noHit    Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  references UsageReference[]
+
+  @@index([source])
+  @@index([noHit])
+  @@index([query])
+  @@index([createdAt])
+}
+
+model UsageReference {
+  id         String @id @default(cuid())
+  usageLogId String
+
+  knowledgeBaseId String
+  knowledgeId     String
+  chunkId         String
+  title           String
+  chunkType       String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  usageLog UsageLog @relation(fields: [usageLogId], references: [id], onDelete: Cascade)
+
+  @@index([usageLogId])
+  @@index([knowledgeBaseId])
+  @@index([knowledgeId])
+  @@index([chunkId])
+  @@index([chunkType])
+}
+
+model Skill {
+  id          String  @id @default(cuid())
+  name        String
+  slug        String  @unique
+  description String?
+
+  type   String @default("rag_agent")
+  status String @default("draft")
+
+  knowledgeScope String @default("{}")
+  inputSchema    String @default("{}")
+  outputSchema   String @default("{}")
+  config         String @default("{}")
+  systemPrompt   String?
+  version        String @default("0.1.0")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  versions SkillVersion[]
+  apiKeys  SkillApiKey[]
+  runLogs  SkillRunLog[]
+
+  @@index([slug])
+  @@index([status])
+  @@index([type])
+  @@index([updatedAt])
+}
+
+model SkillVersion {
+  id           String @id @default(cuid())
+  skillId      String
+  version      String
+  manifestJson String
+  snapshotJson String
+
+  createdAt DateTime @default(now())
+
+  skill Skill @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
+  @@unique([skillId, version])
+  @@index([skillId])
+}
+
+model SkillApiKey {
+  id      String @id @default(cuid())
+  skillId String
+  name    String
+  keyHash String @unique
+  status  String @default("active")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  skill Skill @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
+  @@index([skillId])
+  @@index([status])
+}
+
+model SkillRunLog {
+  id      String @id @default(cuid())
+  skillId String
+
+  inputJson     String
+  outputJson    String?
+  error         String?
+  citationCount Int     @default(0)
+  status        String  @default("success")
+
+  createdAt DateTime @default(now())
+
+  skill Skill @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
+  @@index([skillId])
+  @@index([status])
+  @@index([createdAt])
+}

@@ -1,0 +1,3 @@
+display_name: "机械产品工艺查询"
+short_description: "基于机械产品工艺知识库，查询工艺参数、规范标准、材料选择建议和加工流程步骤。当知识库中无相关信息时返回空结果。"
+default_prompt: "Use 机械产品工艺查询 to answer the user's request with the configured knowledge base and return citations when available."
