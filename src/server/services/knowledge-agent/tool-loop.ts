@@ -17,7 +17,6 @@ import {
   toolActionNameSchema,
   type KnowledgeAgentBudgetState,
   type KnowledgeAgentToolResult,
-  type KnowledgeAgentToolName,
   type ParsedKnowledgeAgentAction,
 } from "@/server/services/knowledge-agent/types";
 import {
