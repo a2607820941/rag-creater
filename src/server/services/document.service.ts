@@ -451,7 +451,8 @@ export async function parseDocument(
       }
     }
 
-    if (doc.rawContent === rawContent && doc.status === "parsed") {
+    // Note documents always allow re-parse (content may be updated externally by the note editor)
+    if (doc.fileType !== "note" && doc.rawContent === rawContent && doc.status === "parsed") {
       onProgress?.("done", 100);
       await updateDocumentStatus(id, "parsed");
       return { rawContent, chunkCount: doc.chunkCount };

@@ -57,7 +57,7 @@ export default function DocumentsPage() {
   const handlePreview = useCallback((id: string) => {
     const params = new URLSearchParams(window.location.search);
     params.set("preview", id);
-    router.push(`/documents?${params.toString()}`);
+    router.push(`/documents?${params.toString()}`, { scroll: false });
     setPreviewId(id);
   }, [router]);
 
@@ -65,7 +65,7 @@ export default function DocumentsPage() {
     const params = new URLSearchParams(window.location.search);
     params.delete("preview");
     const query = params.toString();
-    router.replace(query ? `/documents?${query}` : "/documents");
+    router.replace(query ? `/documents?${query}` : "/documents", { scroll: false });
     setPreviewId(null);
   }, [router]);
 
@@ -83,7 +83,7 @@ export default function DocumentsPage() {
         <div className="bg-white border border-gray-200 rounded-lg p-6">
           <h2 className="text-lg font-semibold text-gray-900 mb-3">上传文件</h2>
           <p className="text-sm text-gray-500 mb-3">
-            支持 .txt .md .csv .xlsx .doc .docx .pdf .ppt .pptx .png .jpg .jpeg .webp .bmp
+            支持 .txt .md .csv .xlsx .doc .docx .pdf .pptx .png .jpg .jpeg .webp .bmp
             格式，最大 100MB
           </p>
           <DocumentUploader onUploaded={handleUploaded} />

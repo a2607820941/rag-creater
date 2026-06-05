@@ -330,41 +330,52 @@ export async function parseFileContent(
       const parser = new PDFParse({ data: buffer });
 
       const [textResult, tableResult, imageResult] = await Promise.all([
-        parser.getText(),
+        parser.getText({ pageJoiner: "" }),
         parser.getTable().catch(() => null),
         parser.getImage({ imageThreshold: 100 }).catch(() => null),
       ]);
 
-      let output = textResult.text;
+      // Build per-page lookup for tables and images
+      const pageTables = new Map();
+      if (tableResult?.pages) {
+        for (const p of tableResult.pages) {
+          pageTables.set(p.num, p.tables);
+        }
+      }
 
-      // Append extracted tables
-      if (tableResult && tableResult.total > 0) {
-        const tableSections: string[] = [];
-        for (const page of tableResult.pages) {
-          for (let t = 0; t < page.tables.length; t++) {
-            const table = page.tables[t];
+      const pageImages = new Map();
+      if (imageResult?.pages) {
+        for (const p of imageResult.pages) {
+          pageImages.set(p.pageNumber, p.images);
+        }
+      }
+
+      // Build output page by page — images land where they appear, not at the end
+      let imageIdx = 0;
+      const parts: string[] = [];
+      for (const page of textResult.pages) {
+        parts.push(page.text);
+
+        const tables = pageTables.get(page.num);
+        if (tables) {
+          for (let t = 0; t < tables.length; t++) {
+            const table = tables[t];
             if (table && table.length >= 2) {
-              tableSections.push(
+              parts.push(
                 `**Page ${page.num} Table ${t + 1}**\n\n${rowsToMarkdownTable(table)}`
               );
             }
           }
         }
-        if (tableSections.length > 0) {
-          output += "\n\n" + tableSections.join("\n\n");
-        }
-      }
 
-      // Extract images for async processing
-      if (imageResult && imageResult.total > 0 && onImage) {
-        let imageIdx = 0;
-        for (const page of imageResult.pages) {
-          for (const img of page.images) {
+        const images = pageImages.get(page.num);
+        if (images && onImage) {
+          for (const img of images) {
             if (!img.data) continue;
             const mimeMatch = img.dataUrl?.match(/data:(image\/[^;]+);/);
             const mimeType = mimeMatch?.[1] ?? "image/png";
             const placeholder = `__PDF_IMAGE_${imageIdx}__`;
-            output += `\n\n[Image ${imageIdx + 1}: pending description]`;
+            parts.push(`\n\n[Image ${imageIdx + 1}: pending description]`);
             onImage({
               index: imageIdx,
               buffer: Buffer.from(img.data),
@@ -377,7 +388,7 @@ export async function parseFileContent(
       }
 
       await parser.destroy();
-      return output;
+      return parts.join("\n");
     }
 
     case "doc": {
@@ -401,13 +412,63 @@ export async function parseFileContent(
           return numA - numB;
         });
 
+      let imageIdx = 0;
       const parts: string[] = [];
       for (let i = 0; i < slideFiles.length; i++) {
+        const slideNum = slideFiles[i].match(/\d+/)![0];
         const xmlContent = await zip.files[slideFiles[i]].async("text");
         const texts = [...xmlContent.matchAll(/<a:t[^>]*>([^<]*)<\/a:t>/g)];
         const slideText = texts.map((m) => m[1]).join("").trim();
         if (slideText) {
           parts.push(`## Slide ${i + 1}\n\n${slideText}`);
+        } else {
+          // Slide has no text but may have images — keep a header
+          parts.push(`## Slide ${i + 1}`);
+        }
+
+        // Extract slide images via relationship lookup
+        if (onImage) {
+          const relsPath = `ppt/slides/_rels/slide${slideNum}.xml.rels`;
+          const relsFile = zip.files[relsPath];
+          if (relsFile) {
+            const relsXml = await relsFile.async("text");
+            const blips = [...xmlContent.matchAll(/<a:blip[^>]*r:embed="([^"]*)"[^>]*>/g)];
+            if (blips.length > 0) {
+              const relMap = new Map<string, string>();
+              for (const [, relId, target] of relsXml.matchAll(
+                /<Relationship[^>]*Id="([^"]*)"[^>]*Target="([^"]*)"[^>]*\/>/g
+              )) {
+                relMap.set(relId, target);
+              }
+
+              for (const [, embedId] of blips) {
+                const target = relMap.get(embedId);
+                if (!target) continue;
+                const mediaPath = target.startsWith("../media/")
+                  ? `ppt/media/${target.replace("../media/", "")}`
+                  : `ppt/media/${target}`;
+                const mediaFile = zip.files[mediaPath];
+                if (!mediaFile) continue;
+
+                const imgBuffer = await mediaFile.async("nodebuffer");
+                const ext = target.split(".").pop()?.toLowerCase() ?? "png";
+                const mimeType =
+                  ext === "jpg" || ext === "jpeg" ? "image/jpeg"
+                  : ext === "webp" ? "image/webp"
+                  : ext === "bmp" ? "image/bmp"
+                  : "image/png";
+                const placeholder = `__PPTX_IMAGE_${imageIdx}__`;
+                parts.push(`\n\n[Image ${imageIdx + 1}: pending description]`);
+                onImage({
+                  index: imageIdx,
+                  buffer: imgBuffer as Buffer,
+                  mimeType,
+                  placeholder,
+                });
+                imageIdx++;
+              }
+            }
+          }
         }
       }
 

@@ -222,6 +222,11 @@ export function DocumentList({ refreshKey, parsingIds, onParse, onPreview }: Doc
     } catch { /* ignore */ }
   };
 
+  const handleNoteUpdate = async (id: string, name: string) => {
+    if (!confirm(`确定从知识笔记重新同步「${name}」的内容并重新解析？`)) return;
+    onParse([id]);
+  };
+
   const toggleSelect = (id: string) => {
     setSelected((prev) => {
       const next = new Set(prev);
@@ -488,12 +493,21 @@ export function DocumentList({ refreshKey, parsingIds, onParse, onPreview }: Doc
                             )}
                           </>
                         )}
-                        <button
-                          onClick={() => handleDelete(doc.id, doc.originalName)}
-                          className="rounded px-2 py-1 text-xs font-medium text-red-500 hover:bg-red-50"
-                        >
-                          删除
-                        </button>
+                        {doc.fileType === "note" ? (
+                          <button
+                            onClick={() => handleNoteUpdate(doc.id, doc.originalName)}
+                            className="rounded px-2 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50"
+                          >
+                            更新
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => handleDelete(doc.id, doc.originalName)}
+                            className="rounded px-2 py-1 text-xs font-medium text-red-500 hover:bg-red-50"
+                          >
+                            删除
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>

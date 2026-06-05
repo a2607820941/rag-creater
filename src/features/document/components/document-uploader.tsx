@@ -7,8 +7,8 @@ import {
   type FileUploadState,
 } from "@/features/document/hooks/use-resumable-upload";
 
-const ALLOWED_EXTENSIONS = ".txt,.md,.csv,.xlsx,.doc,.docx,.pdf,.ppt,.pptx,.png,.jpg,.jpeg,.webp,.bmp";
-const ALLOWED_LIST = ["txt", "md", "csv", "xlsx", "doc", "docx", "pdf", "ppt", "pptx", "png", "jpg", "jpeg", "webp", "bmp"];
+const ALLOWED_EXTENSIONS = ".txt,.md,.csv,.xlsx,.doc,.docx,.pdf,.pptx,.png,.jpg,.jpeg,.webp,.bmp";
+const ALLOWED_LIST = ["txt", "md", "csv", "xlsx", "doc", "docx", "pdf", "pptx", "png", "jpg", "jpeg", "webp", "bmp"];
 const MAX_SIZE_MB = 100;
 
 function formatFileSize(bytes: number): string {

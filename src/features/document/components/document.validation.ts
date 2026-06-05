@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-const ALLOWED_TYPES = ["txt", "md", "csv", "xlsx", "doc", "docx", "pdf", "ppt", "pptx", "png", "jpg", "jpeg", "webp", "bmp"] as const;
+const ALLOWED_TYPES = ["txt", "md", "csv", "xlsx", "doc", "docx", "pdf", "pptx", "png", "jpg", "jpeg", "webp", "bmp"] as const;
 
 export const documentListQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
