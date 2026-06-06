@@ -13,6 +13,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { SKILL_STATUS_LABELS } from "@/features/skill/skill-labels";
+import type { SkillStatus } from "@/features/skill/skill.types";
 
 import type {
   SkillPublishDraft,
@@ -36,6 +37,11 @@ export function SkillPublishDialog({
   const packageDownloadUrl = published
     ? `/api/skills/${published.skill.id}/export-package?format=zip`
     : "";
+  const statusLabel = published
+    ? getSkillStatusLabel(published.skill.status)
+    : draft
+      ? getSkillStatusLabel(draft.status)
+      : "";
 
   return (
     <Dialog open={Boolean(draft)} onOpenChange={(open) => !open && onClose()}>
@@ -61,10 +67,7 @@ export function SkillPublishDialog({
                 </div>
                 <div className="mt-3 grid gap-1 text-xs">
                   <span>
-                    状态：
-                    {published
-                      ? SKILL_STATUS_LABELS[published.skill.status]
-                      : SKILL_STATUS_LABELS[draft.status]}
+                    状态：{statusLabel}
                   </span>
                   <span>文件：{skillPath}</span>
                   {published && <span>调用接口：{published.endpoint}</span>}
@@ -158,4 +161,13 @@ export function SkillPublishDialog({
       </DialogContent>
     </Dialog>
   );
+}
+
+function getSkillStatusLabel(status: string) {
+  if (isSkillStatus(status)) return SKILL_STATUS_LABELS[status];
+  return status;
+}
+
+function isSkillStatus(status: string): status is SkillStatus {
+  return status === "draft" || status === "published" || status === "disabled";
 }
