@@ -5,6 +5,7 @@ import {
   LayoutDashboard,
   MessageSquareMore,
   NotebookTabs,
+  PackageCheck,
   SquareLibrary,
   type LucideIcon,
 } from "lucide-react";
@@ -80,6 +81,13 @@ export const adminNavItems = [
     title: "专家对话",
     href: "/agents/chat",
     Icon: MessageSquareMore,
+    match: "prefix",
+  },
+  {
+    label: "Skill 管理",
+    title: "Skill 管理",
+    href: "/skills",
+    Icon: PackageCheck,
     match: "prefix",
   },
 ] satisfies AdminNavItem[];
