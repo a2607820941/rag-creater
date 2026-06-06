@@ -74,36 +74,6 @@ async function deleteEmbeddingsForDocumentChunks(documentSourceId: string) {
   await deleteChunkEmbeddings(chunks.map((chunk) => chunk.id));
 }
 
-async function listDocumentRagChunksForIndex(documentSourceId: string) {
-  const chunks = await prisma.documentChunk.findMany({
-    where: {
-      documentSourceId,
-      content: { not: "" },
-    },
-    include: {
-      documentSource: {
-        include: {
-          knowledgeBases: {
-            orderBy: { sortOrder: "asc" },
-            include: {
-              knowledgeBase: {
-                select: {
-                  id: true,
-                  name: true,
-                  status: true,
-                },
-              },
-            },
-          },
-        },
-      },
-    },
-    orderBy: { chunkIndex: "asc" },
-  });
-
-  return chunks.map((chunk) => mapDocumentChunkToKnowledgeChunk(chunk));
-}
-
 async function reindexRetrievableDocumentChunks(documentSourceId: string) {
   const chunks = await prisma.documentChunk.findMany({
     where: {
@@ -142,20 +112,8 @@ export async function replaceTextChunksAndIndex(
   options: { rawContent?: string }
 ) {
   await prisma.$transaction(async (tx) => {
-    const oldChunks = await tx.documentChunk.findMany({
-      where: { documentSourceId },
-      select: { id: true },
-    });
-    const oldChunkIds = oldChunks.map((chunk) => chunk.id);
-
-    if (oldChunkIds.length > 0) {
-      await tx.chunkEmbedding.deleteMany({
-        where: { chunkId: { in: oldChunkIds } },
-      });
-    }
-
     await tx.documentChunk.deleteMany({
-      where: { documentSourceId },
+      where: { documentSourceId, chunkType: "text" },
     });
 
     if (chunks.length > 0) {
@@ -167,7 +125,7 @@ export async function replaceTextChunksAndIndex(
           charStart: chunk.charStart,
           charEnd: chunk.charEnd,
           chunkType: "text",
-          chunkStatus: "disabled",
+          chunkStatus: "active",
         })),
       });
     }
@@ -175,63 +133,13 @@ export async function replaceTextChunksAndIndex(
     await tx.documentSource.update({
       where: { id: documentSourceId },
       data: {
-        status: "parsing",
+        status: "parsed",
         rawContent: options.rawContent,
         chunkCount: chunks.length,
         error: null,
       },
     });
   });
-
-  const ragChunks = await listDocumentRagChunksForIndex(documentSourceId);
-  const indexedChunkIds = ragChunks.map((chunk) => chunk.id);
-
-  try {
-    await indexChunks(ragChunks);
-
-    await prisma.$transaction([
-      prisma.documentChunk.updateMany({
-        where: {
-          id: { in: indexedChunkIds },
-          chunkType: "text",
-        },
-        data: { chunkStatus: "active" },
-      }),
-      prisma.documentSource.update({
-        where: { id: documentSourceId },
-        data: {
-          status: "parsed",
-          rawContent: options.rawContent,
-          chunkCount: chunks.length,
-          error: null,
-        },
-      }),
-    ]);
-
-    await upsertDocumentKnowledgeMap(documentSourceId).catch((error) => {
-      console.warn(
-        "Failed to update document knowledge map:",
-        error instanceof Error ? error.message : error
-      );
-    });
-  } catch (error) {
-    await deleteChunkEmbeddings(indexedChunkIds);
-    await prisma.$transaction([
-      prisma.documentChunk.updateMany({
-        where: { id: { in: indexedChunkIds } },
-        data: { chunkStatus: "disabled" },
-      }),
-      prisma.documentSource.update({
-        where: { id: documentSourceId },
-        data: {
-          status: "failed",
-          error: getErrorMessage(error, "Embedding index failed"),
-        },
-      }),
-    ]);
-
-    throw error;
-  }
 }
 
 // ========== Types ==========
