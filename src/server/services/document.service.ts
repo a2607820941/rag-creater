@@ -13,7 +13,7 @@ import {
 import { splitTextIntoChunks } from "@/lib/text-splitter";
 import { splitTextSemantic } from "@/lib/semantic-splitter";
 import type { TextChunk } from "@/lib/text-splitter";
-import type { DocImage } from "@/lib/file-parser";
+
 import { badRequest, notFound } from "@/features/knowledge-bases/server/errors";
 import {
   mapDocumentChunk,
@@ -40,7 +40,17 @@ const UPLOAD_DIR = path.join(process.cwd(), "public", "uploads");
 // ========== Helpers ==========
 
 function containsTable(text: string): boolean {
-  return /^\|.+\|$/m.test(text);
+  // 需连续2行以上 |...| 格式才视为表格，避免代码块中单个 |text| 行误判
+  let consecutive = 0;
+  for (const line of text.split("\n")) {
+    if (/^\|.+\|$/.test(line.trim())) {
+      consecutive++;
+      if (consecutive >= 2) return true;
+    } else {
+      consecutive = 0;
+    }
+  }
+  return false;
 }
 
 async function ensureUploadDir(): Promise<void> {
@@ -62,82 +72,6 @@ async function deleteEmbeddingsForDocumentChunks(documentSourceId: string) {
   });
 
   await deleteChunkEmbeddings(chunks.map((chunk) => chunk.id));
-}
-
-async function processDocumentImages(
-  documentId: string,
-  images: DocImage[]
-): Promise<void> {
-  const { chatWithVision } = await import("@/lib/ai-extract");
-  const { IMAGE_DESCRIPTION_PROMPT } = await import("@/lib/prompts/extraction");
-
-  const results = await Promise.allSettled(
-    images.map(async (img) => {
-      try {
-        const description = await chatWithVision(
-          img.buffer,
-          img.mimeType,
-          IMAGE_DESCRIPTION_PROMPT
-        );
-        return { placeholder: img.placeholder, description };
-      } catch {
-        return { placeholder: img.placeholder, description: "[Image: could not describe]" };
-      }
-    })
-  );
-
-  // Build replacement map
-  const replacements = new Map<string, string>();
-  for (const result of results) {
-    if (result.status === "fulfilled") {
-      const img = images.find((i) => i.placeholder === result.value.placeholder);
-      if (img) {
-        replacements.set(
-          `[Image ${img.index + 1}: pending description]`,
-          `[Image: ${result.value.description.slice(0, 500)}]`
-        );
-      }
-    }
-  }
-
-  if (replacements.size === 0) return;
-
-  function applyReplacements(text: string): string {
-    for (const [from, to] of replacements) {
-      text = text.replace(from, to);
-    }
-    return text;
-  }
-
-  const doc = await prisma.documentSource.findUnique({
-    where: { id: documentId },
-    select: { rawContent: true },
-  });
-  if (!doc?.rawContent) return;
-
-  // Update rawContent
-  const updatedRaw = applyReplacements(doc.rawContent);
-  await prisma.documentSource.update({
-    where: { id: documentId },
-    data: { rawContent: updatedRaw },
-  });
-
-  // Update chunk contents — frontend shows these, not just rawContent
-  const chunks = await prisma.documentChunk.findMany({
-    where: { documentSourceId: documentId },
-    select: { id: true, content: true },
-  });
-  for (const chunk of chunks) {
-    const updatedChunk = applyReplacements(chunk.content);
-    if (updatedChunk !== chunk.content) {
-      await prisma.documentChunk.update({
-        where: { id: chunk.id },
-        data: { content: updatedChunk },
-      });
-    }
-  }
-
-  await reindexRetrievableDocumentChunks(documentId);
 }
 
 async function listDocumentRagChunksForIndex(documentSourceId: string) {
@@ -459,7 +393,6 @@ export async function parseDocument(
 
   try {
     let rawContent: string;
-    const docImages: DocImage[] = [];
 
     if (isNote) {
       // Notes have rawContent in DB, no file on disk — parse as markdown
@@ -483,7 +416,7 @@ export async function parseDocument(
       } else {
         const buffer = await fs.readFile(filePath);
         onProgress?.("parse", 30);
-        rawContent = await parseFileContent(buffer, doc.fileType, (img) => docImages.push(img));
+        rawContent = await parseFileContent(buffer, doc.fileType);
       }
     }
 
@@ -511,13 +444,6 @@ export async function parseDocument(
 
     onProgress?.("save", 80);
     await replaceTextChunksAndIndex(id, chunks, { rawContent });
-
-    // Async image processing — fire and forget
-    if (docImages.length > 0) {
-      processDocumentImages(id, docImages).catch((err) =>
-        console.error("Async image processing failed:", err instanceof Error ? err.message : err)
-      );
-    }
 
     onProgress?.("done", 100);
     return { rawContent, chunkCount: chunks.length };
