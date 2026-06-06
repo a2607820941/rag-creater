@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import {
   useCallback,
   useEffect,
@@ -8,7 +9,7 @@ import {
   useState,
 } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Plus, Sparkles, Trash2 } from "lucide-react";
+import { PackageCheck, Plus, Sparkles, Trash2 } from "lucide-react";
 
 import { AdminShell } from "@/components/layout/admin-shell";
 import type {
@@ -164,9 +165,13 @@ export default function AgentChatPage() {
   }, []);
 
   useEffect(() => {
-    const initialAgentId = new URLSearchParams(window.location.search).get(
-      "agentId"
-    );
+    const params = new URLSearchParams(window.location.search);
+    const initialAgentId = params.get("agentId");
+    const initialMode = params.get("mode");
+
+    if (initialMode === "skill-agent") {
+      setChatMode("skill-agent");
+    }
 
     fetch("/api/agents?status=active&pageSize=100")
       .then((res) => res.json())
@@ -635,14 +640,23 @@ export default function AgentChatPage() {
                     </p>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={startNewConversation}
-                  className="inline-flex h-9 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
-                >
-                  <Plus aria-hidden="true" />
-                  New
-                </button>
+                <div className="flex shrink-0 items-center gap-2">
+                  <Link
+                    href="/skills"
+                    className="inline-flex h-9 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+                  >
+                    <PackageCheck aria-hidden="true" className="size-4" />
+                    Skill 管理
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={startNewConversation}
+                    className="inline-flex h-9 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+                  >
+                    <Plus aria-hidden="true" />
+                    New
+                  </button>
+                </div>
               </div>
             </header>
           )}
@@ -657,6 +671,15 @@ export default function AgentChatPage() {
                   <h1 className="text-3xl font-semibold tracking-normal text-slate-950 md:text-4xl">
                     Ask Embark anything
                   </h1>
+                  {chatMode === "skill-agent" && (
+                    <Link
+                      href="/skills"
+                      className="inline-flex h-8 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+                    >
+                      <PackageCheck aria-hidden="true" className="size-4" />
+                      Skill 管理
+                    </Link>
+                  )}
                 </div>
 
                 <ChatComposer

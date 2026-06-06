@@ -1,0 +1,110 @@
+{
+  "schemaVersion": "1.0",
+  "packageType": "enterprise-rag-skill",
+  "id": "cmq1xzows002poraxuz8szcwv",
+  "name": "Webpack 知识问答",
+  "slug": "webpack-qa",
+  "version": "0.1.0",
+  "description": "基于八股文知识库回答业务运营同学关于 Webpack 的提问，必须返回引用，证据不足时说明无法回答 Use for qa tasks in the general domain for employee users, with platform RAG grounding and citations.",
+  "compatibleAgents": [
+    "claude-code",
+    "codex"
+  ],
+  "taskScenario": {
+    "domain": "general",
+    "intent": "qa",
+    "audience": "employee",
+    "description": "为业务运营同学提供 Webpack 相关知识的问答服务。基于八股文知识库进行检索，回答必须附带知识库引用。当知识库中缺乏相关信息时，明确告知无法回答，不进行推测或编造。",
+    "triggerExamples": [
+      "Webpack 和 Vite 有什么区别？",
+      "如何配置 Webpack 的 loader？",
+      "Webpack 的 Tree Shaking 是什么？",
+      "Webpack 的 entry 和 output 怎么配置？",
+      "Webpack 的 HMR 热更新原理是什么？"
+    ],
+    "nonGoals": [
+      "回答与 Webpack 无关的问题（如 Vue、React 等框架问题）",
+      "代替正式文档或官方指南",
+      "提供代码生成或调试服务",
+      "回答需要实时数据或外部 API 的问题"
+    ],
+    "outputStyle": "answer_with_citations"
+  },
+  "runtime": {
+    "type": "http",
+    "mode": "platform_rag",
+    "endpoint": "http://localhost:3000/api/public/skills/webpack-qa/run",
+    "method": "POST",
+    "auth": {
+      "type": "bearer"
+    },
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "question": {
+          "type": "string",
+          "description": "用户关于 Webpack 的提问"
+        }
+      },
+      "required": [
+        "question"
+      ]
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "answer": {
+          "type": "string",
+          "description": "基于知识库的 Webpack 问题回答，包含引用标记"
+        },
+        "citations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "source": {
+                "type": "string",
+                "description": "知识库来源名称"
+              },
+              "content": {
+                "type": "string",
+                "description": "引用的具体内容片段"
+              }
+            }
+          },
+          "description": "回答中引用的知识库来源列表"
+        },
+        "hasAnswer": {
+          "type": "boolean",
+          "description": "是否成功从知识库中找到答案"
+        },
+        "errorMessage": {
+          "type": "string",
+          "description": "当 hasAnswer 为 false 时，说明无法回答的原因"
+        }
+      },
+      "required": [
+        "answer",
+        "citations",
+        "hasAnswer"
+      ]
+    },
+    "skillId": "cmq1xzows002poraxuz8szcwv"
+  },
+  "resources": {
+    "entrypoint": "SKILL.md",
+    "installGuide": "INSTALL.md",
+    "references": [
+      "references/api.md",
+      "references/knowledge-scope.md",
+      "references/task-scenario.md",
+      "references/examples.md",
+      "references/runtime.md"
+    ],
+    "scripts": [
+      "scripts/run-skill.mjs",
+      "scripts/set-runtime-key.mjs",
+      "scripts/install-skill.mjs"
+    ]
+  }
+}
