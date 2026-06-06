@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { publishSkill } from "@/server/services/skill/skill.service";
+import {
+  SkillValidationError,
+  publishSkill,
+} from "@/server/services/skill/skill.service";
 import { skillIdSchema } from "@/features/skill/skill.validation";
 
 export async function POST(
@@ -19,6 +22,20 @@ export async function POST(
     const result = await publishSkill(parsed.data.id, request.nextUrl.origin);
     return NextResponse.json({ success: true, data: result });
   } catch (error) {
+    if (error instanceof SkillValidationError) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: {
+            code: "VALIDATION_ERROR",
+            message: error.validation.summary.message,
+          },
+          data: error.validation,
+        },
+        { status: 400 }
+      );
+    }
+
     const message =
       error instanceof Error ? error.message : "Failed to publish skill";
     const status = message === "Skill not found" ? 404 : 500;
