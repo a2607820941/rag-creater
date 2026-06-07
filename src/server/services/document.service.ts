@@ -360,10 +360,7 @@ export async function updateDocumentContent(id: string, rawContent: string) {
   if (isImage) {
     chunks = [{ content: rawContent, charStart: 0, charEnd: rawContent.length }];
   } else {
-    const hasTable = containsTable(rawContent);
-    const semanticChunks = hasTable
-      ? null
-      : await splitTextSemantic(rawContent);
+    const semanticChunks = await splitTextSemantic(rawContent);
     chunks = semanticChunks ?? splitTextIntoChunks(rawContent);
   }
 

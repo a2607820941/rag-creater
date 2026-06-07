@@ -81,16 +81,17 @@ const MAX_TABLE_COLS_MARKDOWN = 5;
  */
 function mammothHtmlToMarkdown(html: string): string {
   // 1. Convert <table> elements to Markdown pipe tables
+  // Using [\s\S] instead of "." with "s" flag for broader TS target compat
   let result = html.replace(
-    /<table>(.*?)<\/table>/gs,
+    /<table>([\s\S]*?)<\/table>/g,
     (_, tableContent: string) => {
       const rows: string[][] = [];
-      for (const rowMatch of tableContent.matchAll(/<tr>(.*?)<\/tr>/gs)) {
+      for (const rowMatch of tableContent.matchAll(/<tr>([\s\S]*?)<\/tr>/g)) {
         const cells: string[] = [];
-        for (const cellMatch of rowMatch[1].matchAll(/<td>(.*?)<\/td>/gs)) {
+        for (const cellMatch of rowMatch[1].matchAll(/<td>([\s\S]*?)<\/td>/g)) {
           // Extract text from <p> tags inside <td>, join multi-paragraph cells
           const cellText = cellMatch[1]
-            .replace(/<p>(.*?)<\/p>/gs, (_: string, p: string) => p + "\n")
+            .replace(/<p>([\s\S]*?)<\/p>/g, (_: string, p: string) => p + "\n")
             .trim();
           cells.push(cellText);
         }
@@ -102,7 +103,7 @@ function mammothHtmlToMarkdown(html: string): string {
   );
 
   // 2. Convert <p> tags to plain text paragraphs
-  result = result.replace(/<p>(.*?)<\/p>/gs, "$1\n\n");
+  result = result.replace(/<p>([\s\S]*?)<\/p>/g, "$1\n\n");
 
   // 3. Clean up: remove excessive blank lines, but keep paragraph separators
   result = result.replace(/\n{4,}/g, "\n\n\n");
