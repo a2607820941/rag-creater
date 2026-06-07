@@ -1,4 +1,5 @@
 import { RAG_CONFIG } from "@/server/services/rag/config";
+import { rerankCandidates } from "@/server/services/rag/candidate-reranker";
 import { searchByBm25 } from "@/server/services/rag/bm25";
 import { expandWithAdjacentChunks } from "@/server/services/rag/context-expander";
 import { buildRetrieveResponse } from "@/server/services/rag/context-builder";
@@ -8,7 +9,6 @@ import { searchByExactTerms } from "@/server/services/rag/exact-term";
 import { fuseByRrf } from "@/server/services/rag/hybrid";
 import { selectByMmr } from "@/server/services/rag/mmr";
 import { processQueryWithRewrite } from "@/server/services/rag/query-processor";
-import { rerankByRules } from "@/server/services/rag/rules-reranker";
 import { applyMinScoreThreshold } from "@/server/services/rag/score-threshold";
 import { searchByVector } from "@/server/services/rag/vector-store";
 import type {
@@ -65,7 +65,11 @@ export async function retrieveRagContexts(
     )
   ).flat();
   const fusedChunks = fuseByRrf(resultGroups);
-  const rerankedChunks = rerankByRules(fusedChunks, processedQuery, mode);
+  const rerankedChunks = await rerankCandidates(
+    fusedChunks,
+    processedQuery,
+    mode
+  );
   const thresholdResult = applyMinScoreThreshold(rerankedChunks);
 
   if (thresholdResult.status === "fallback_top1") {
