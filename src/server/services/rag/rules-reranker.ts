@@ -34,6 +34,8 @@ type RuleScoredResult = {
   updatedAtMs: number;
 };
 
+export type RuleRerankScore = RuleScoredResult;
+
 const ASCII_STOP_WORDS = new Set(["how", "what", "where", "can", "should"]);
 
 const CJK_STOP_TERMS = new Set([
@@ -69,6 +71,28 @@ export function rerankByRules(
   if (results.length <= 1) return rerank(results);
   if (!RAG_CONFIG.rulesRerankEnabled) return rerank(results);
 
+  return scoreByRules(results, processedQuery, mode)
+    .sort(compareRuleScoredResults)
+    .map(({ result, finalScore }, index) => ({
+      ...result,
+      score: Number(finalScore.toFixed(4)),
+      rank: index + 1,
+    }));
+}
+
+/**
+ * 为候选结果计算可复用的规则分数。
+ *
+ * Voyage reranker 接入后会继续使用这部分业务字段分数，
+ * 让语义 rerank 结果保留标题、摘要、来源、类型和新鲜度等可解释信号。
+ */
+export function scoreByRules(
+  results: RankedRetrievalResult[],
+  processedQuery: ProcessedQuery,
+  mode: RetrievalMode
+): RuleRerankScore[] {
+  if (results.length === 0) return [];
+
   const queryProfile = buildQueryProfile(processedQuery);
   const baseScores = normalizeScores(results.map((result) => result.score));
   const freshnessScores = getFreshnessScores(results);
@@ -80,28 +104,21 @@ export function rerankByRules(
   );
   const boostScores = normalizeScores(rawBoostScores);
 
-  return results
-    .map((result, index): RuleScoredResult => {
-      const baseScore = baseScores[index];
-      const boostScore = boostScores[index];
-      const finalScore =
-        RAG_CONFIG.rulesRerankBaseWeight * baseScore +
-        RAG_CONFIG.rulesRerankBoostWeight * boostScore;
+  return results.map((result, index): RuleScoredResult => {
+    const baseScore = baseScores[index];
+    const boostScore = boostScores[index];
+    const finalScore =
+      RAG_CONFIG.rulesRerankBaseWeight * baseScore +
+      RAG_CONFIG.rulesRerankBoostWeight * boostScore;
 
-      return {
-        result,
-        baseScore,
-        boostScore,
-        finalScore,
-        updatedAtMs: toTimestamp(result.chunk.updatedAt),
-      };
-    })
-    .sort(compareRuleScoredResults)
-    .map(({ result, finalScore }, index) => ({
-      ...result,
-      score: Number(finalScore.toFixed(4)),
-      rank: index + 1,
-    }));
+    return {
+      result,
+      baseScore,
+      boostScore,
+      finalScore,
+      updatedAtMs: toTimestamp(result.chunk.updatedAt),
+    };
+  });
 }
 
 /** 将 query processor 的输出整理成规则精排需要的短语、词项和意图画像。 */
