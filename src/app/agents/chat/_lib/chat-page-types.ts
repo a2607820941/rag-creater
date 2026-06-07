@@ -28,6 +28,12 @@ export type ConversationUpdateResponse = {
   error?: { message?: string };
 };
 
+export type ConversationCreateResponse = {
+  success: boolean;
+  data?: ChatConversationDTO;
+  error?: { message?: string };
+};
+
 export type ChatAttachmentResponse = {
   success: boolean;
   data?: ChatAttachmentDTO;

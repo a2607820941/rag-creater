@@ -83,7 +83,9 @@ export function ConversationSidebar({
                       {conversation.title || "New conversation"}
                     </span>
                     <span className="mt-0.5 flex min-w-0 items-center gap-1 text-[11px] text-sidebar-foreground/60">
-                      <span className="truncate">{conversation.mode}</span>
+                      <span className="truncate">
+                        {formatConversationMode(conversation.mode)}
+                      </span>
                       <span aria-hidden="true">/</span>
                       <span className="shrink-0">
                         {formatConversationTime(conversation.updatedAt)}
@@ -98,6 +100,14 @@ export function ConversationSidebar({
       </div>
     </div>
   );
+}
+
+function formatConversationMode(mode: string) {
+  if (mode === "knowledge-agent") return "Knowledge Agent";
+  if (mode === "openai" || mode === "rag-openai") return "LLM";
+  if (mode === "skill-agent") return "Skill Agent";
+  if (mode === "agent") return "Agent";
+  return mode;
 }
 
 function formatConversationTime(value: string) {

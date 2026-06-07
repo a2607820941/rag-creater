@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   startTransition,
   useCallback,
@@ -23,6 +24,7 @@ import { SkillPublishDialog } from "./_components/skill-publish-dialog";
 import { useChatScroll } from "./_hooks/use-chat-scroll";
 import { useTypingQueue } from "./_hooks/use-typing-queue";
 import {
+  createConversationRequest,
   deleteConversationRequest,
   fetchActiveAgents,
   fetchConversationMessages,
@@ -59,6 +61,7 @@ const CREATE_EMPTY_CONVERSATION_EVENT = "chat:create-empty-conversation";
 const REFRESH_CONVERSATIONS_EVENT = "chat:refresh-conversations";
 
 export default function AgentChatPage() {
+  const router = useRouter();
   const [agents, setAgents] = useState<AgentItem[]>([]);
   const [agentId, setAgentId] = useState("");
   const [chatMode, setChatMode] = useState<ChatMode>("knowledge-agent");
@@ -620,7 +623,7 @@ export default function AgentChatPage() {
     stopTypingSession();
   }
 
-  function startNewConversation() {
+  function resetConversationDraft() {
     chatAbortRef.current?.abort();
     chatAbortRef.current = null;
     stopTypingSession();
@@ -631,6 +634,35 @@ export default function AgentChatPage() {
     setAttachments([]);
     setError(null);
     resetScrollTracking();
+  }
+
+  async function startNewConversation() {
+    if (loading) return;
+
+    resetConversationDraft();
+    setError(null);
+
+    try {
+      const { response, json } = await createConversationRequest({
+        mode: "knowledge-agent",
+      });
+
+      if (!response.ok || !json?.success || !json.data) {
+        throw new Error(json?.error?.message || "Failed to create conversation");
+      }
+
+      const conversation = json.data;
+      upsertConversation(conversation);
+      setConversationId(conversation.id);
+      setAgentId(conversation.agentId ?? "");
+      setChatMode(toClientChatMode(conversation.mode, conversation.agentId));
+      router.push(`/agents/chat?conversationId=${conversation.id}`);
+      window.dispatchEvent(new Event(REFRESH_CONVERSATIONS_EVENT));
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to create conversation"
+      );
+    }
   }
 
   function openConversation(conversation: ChatConversationDTO) {
@@ -708,7 +740,7 @@ export default function AgentChatPage() {
 
       removeConversation(id);
       if (conversationId === id) {
-        startNewConversation();
+        resetConversationDraft();
       }
     } catch (err) {
       setError(

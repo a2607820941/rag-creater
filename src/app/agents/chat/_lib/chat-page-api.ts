@@ -1,6 +1,7 @@
 import type {
   AgentListResponse,
   ChatAttachmentResponse,
+  ConversationCreateResponse,
   ConversationUpdateResponse,
   MessageListResponse,
 } from "./chat-page-types";
@@ -63,6 +64,19 @@ export async function deleteConversationRequest(conversationId: string) {
     success?: boolean;
     error?: { message?: string };
   }>(response);
+
+  return { response, json };
+}
+
+export async function createConversationRequest(
+  payload: { agentId?: string; mode: ChatMode } = { mode: "knowledge-agent" }
+) {
+  const response = await fetch("/api/conversations", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const json = await parseJsonResponse<ConversationCreateResponse>(response);
 
   return { response, json };
 }
