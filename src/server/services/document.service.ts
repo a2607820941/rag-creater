@@ -39,20 +39,6 @@ const UPLOAD_DIR = path.join(process.cwd(), "public", "uploads");
 
 // ========== Helpers ==========
 
-function containsTable(text: string): boolean {
-  // 需连续2行以上 |...| 格式才视为表格，避免代码块中单个 |text| 行误判
-  let consecutive = 0;
-  for (const line of text.split("\n")) {
-    if (/^\|.+\|$/.test(line.trim())) {
-      consecutive++;
-      if (consecutive >= 2) return true;
-    } else {
-      consecutive = 0;
-    }
-  }
-  return false;
-}
-
 async function ensureUploadDir(): Promise<void> {
   try {
     await fs.mkdir(UPLOAD_DIR, { recursive: true });
@@ -343,10 +329,7 @@ export async function parseDocument(
     if (isImage) {
       chunks = [{ content: rawContent, charStart: 0, charEnd: rawContent.length }];
     } else {
-      const hasTable = containsTable(rawContent);
-      const semanticChunks = hasTable
-        ? null
-        : await splitTextSemantic(rawContent);
+      const semanticChunks = await splitTextSemantic(rawContent);
       chunks = semanticChunks ?? splitTextIntoChunks(rawContent);
     }
 
