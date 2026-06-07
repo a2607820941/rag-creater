@@ -28,7 +28,6 @@ import {
   deleteChunkEmbeddings,
   indexChunks,
 } from "@/server/services/rag/vector-index-repository";
-import { upsertDocumentKnowledgeMap } from "@/server/services/knowledge-agent/knowledge-map";
 import type {
   CreateDocumentChunkInput,
   CreateDocumentSourceInput,
@@ -627,20 +626,6 @@ export async function updateDocumentSourceService(
         },
       },
     });
-
-    if (
-      input.rawContent !== undefined &&
-      input.rawContent !== currentDocument.rawContent &&
-      document.status === "parsed" &&
-      document.activeStatus === "active"
-    ) {
-      await upsertDocumentKnowledgeMap(id).catch((error) => {
-        console.warn("Failed to refresh document knowledge map", {
-          documentSourceId: id,
-          error,
-        });
-      });
-    }
 
     if (
       input.title !== undefined &&
