@@ -88,7 +88,6 @@ model DocumentSource {
 
   knowledgeBases KnowledgeBaseDocument[]
   chunks         DocumentChunk[]
-  knowledgeMap   DocumentKnowledgeMap?
 
   @@index([knowledgeBaseId])
   @@index([sourceType])
@@ -164,23 +163,6 @@ model DocumentChunk {
   @@index([knowledgeBaseId])
   @@index([documentSourceId, chunkStatus])
   @@index([documentSourceId, chunkIndex])
-}
-
-model DocumentKnowledgeMap {
-  id               String @id @default(cuid())
-  documentSourceId String @unique
-
-  summary      String
-  keywordsJson String @default("[]")
-  outlineJson  String @default("[]")
-  signalsJson  String @default("{}")
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  documentSource DocumentSource @relation(fields: [documentSourceId], references: [id], onDelete: Cascade)
-
-  @@index([updatedAt])
 }
 
 model ChunkEmbedding {
