@@ -74,6 +74,43 @@ export function getFileTypeFromName(filename: string): string | null {
 const MAX_TABLE_COLS_MARKDOWN = 5;
 
 /**
+ * Convert mammoth HTML output to Markdown with proper pipe tables.
+ * mammoth's convertToMarkdown does NOT output pipe tables for most Word tables
+ * (cells with <w:p> wrappers become separate paragraphs). We use HTML output
+ * instead and convert <table> elements ourselves.
+ */
+function mammothHtmlToMarkdown(html: string): string {
+  // 1. Convert <table> elements to Markdown pipe tables
+  let result = html.replace(
+    /<table>(.*?)<\/table>/gs,
+    (_, tableContent: string) => {
+      const rows: string[][] = [];
+      for (const rowMatch of tableContent.matchAll(/<tr>(.*?)<\/tr>/gs)) {
+        const cells: string[] = [];
+        for (const cellMatch of rowMatch[1].matchAll(/<td>(.*?)<\/td>/gs)) {
+          // Extract text from <p> tags inside <td>, join multi-paragraph cells
+          const cellText = cellMatch[1]
+            .replace(/<p>(.*?)<\/p>/gs, (_: string, p: string) => p + "\n")
+            .trim();
+          cells.push(cellText);
+        }
+        if (cells.length > 0) rows.push(cells);
+      }
+      if (rows.length === 0) return "";
+      return rowsToMarkdownTable(rows) + "\n\n";
+    }
+  );
+
+  // 2. Convert <p> tags to plain text paragraphs
+  result = result.replace(/<p>(.*?)<\/p>/gs, "$1\n\n");
+
+  // 3. Clean up: remove excessive blank lines, but keep paragraph separators
+  result = result.replace(/\n{4,}/g, "\n\n\n");
+
+  return result.trim();
+}
+
+/**
  * Format table rows. Wide tables (>5 cols) use key-value per row;
  * narrow tables use Markdown grid.
  */
@@ -292,7 +329,11 @@ export async function parseFileContent(
 
     case "docx": {
       const images: { idx: number; buffer: Buffer; mimeType: string; placeholder: string }[] = [];
-      const result = await (mammoth as unknown as { convertToMarkdown: typeof mammoth.convertToHtml }).convertToMarkdown(
+
+      // Use convertToHtml to preserve table structure, then convert to
+      // Markdown ourselves. mammoth's convertToMarkdown falls back to
+      // paragraph-per-cell for most Word tables (any cell with <w:p>).
+      const htmlResult = await mammoth.convertToHtml(
         { buffer },
         {
           convertImage: mammoth.images.imgElement(
@@ -307,7 +348,7 @@ export async function parseFileContent(
         }
       );
 
-      let text = result.value;
+      let text = mammothHtmlToMarkdown(htmlResult.value);
 
       // Replace image placeholders with Vision API descriptions synchronously
       if (images.length > 0) {
