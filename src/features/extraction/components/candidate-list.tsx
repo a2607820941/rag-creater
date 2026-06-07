@@ -10,6 +10,8 @@ interface Candidate {
   suggested_category: string | null;
   suggested_tags: string[];
   type: string;
+  sourceType?: string | null;
+  documentTitle?: string | null;
 }
 
 interface Props {
@@ -48,12 +50,13 @@ export default function CandidateList({
       return;
     }
 
-    setSelected(new Set([initialSelectedId]));
-
-    window.requestAnimationFrame(() => {
+    const frame = window.requestAnimationFrame(() => {
+      setSelected(new Set([initialSelectedId]));
       const element = document.getElementById(`candidate-${initialSelectedId}`);
       element?.scrollIntoView({ behavior: "smooth", block: "center" });
     });
+
+    return () => window.cancelAnimationFrame(frame);
   }, [candidates, initialSelectedId]);
 
   const toggle = (id: string) => {

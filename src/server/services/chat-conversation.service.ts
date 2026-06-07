@@ -62,6 +62,35 @@ export async function listChatConversations(options?: {
   };
 }
 
+export async function createEmptyChatConversation(input?: {
+  mode?: string;
+  agentId?: string;
+}): Promise<ChatConversationDTO> {
+  const conversation = await prisma.chatConversation.create({
+    data: {
+      title: "New conversation",
+      mode: input?.mode ?? "knowledge-agent",
+      agentId: input?.agentId,
+    },
+    include: {
+      _count: {
+        select: { messages: true },
+      },
+    },
+  });
+
+  return {
+    id: conversation.id,
+    title: conversation.title,
+    mode: conversation.mode,
+    agentId: conversation.agentId,
+    status: conversation.status,
+    messageCount: conversation._count.messages,
+    createdAt: conversation.createdAt.toISOString(),
+    updatedAt: conversation.updatedAt.toISOString(),
+  };
+}
+
 export async function getOrCreateChatConversation(input: {
   conversationId?: string;
   message: string;
@@ -73,7 +102,20 @@ export async function getOrCreateChatConversation(input: {
       where: { id: input.conversationId },
     });
 
-    if (existing) return existing;
+    if (existing) {
+      if (existing.title === "New conversation") {
+        return prisma.chatConversation.update({
+          where: { id: existing.id },
+          data: {
+            title: createConversationTitle(input.message),
+            mode: input.mode,
+            agentId: input.agentId,
+          },
+        });
+      }
+
+      return existing;
+    }
   }
 
   return prisma.chatConversation.create({
@@ -131,6 +173,43 @@ export async function deleteChatConversation(
   });
 
   return true;
+}
+
+export async function updateChatConversationModel(input: {
+  conversationId: string;
+  mode: string;
+  agentId?: string | null;
+}): Promise<ChatConversationDTO | null> {
+  const existing = await prisma.chatConversation.findUnique({
+    where: { id: input.conversationId },
+    select: { id: true, status: true },
+  });
+
+  if (!existing || existing.status !== "active") return null;
+
+  const conversation = await prisma.chatConversation.update({
+    where: { id: input.conversationId },
+    data: {
+      mode: input.mode,
+      agentId: input.agentId || null,
+    },
+    include: {
+      _count: {
+        select: { messages: true },
+      },
+    },
+  });
+
+  return {
+    id: conversation.id,
+    title: conversation.title,
+    mode: conversation.mode,
+    agentId: conversation.agentId,
+    status: conversation.status,
+    messageCount: conversation._count.messages,
+    createdAt: conversation.createdAt.toISOString(),
+    updatedAt: conversation.updatedAt.toISOString(),
+  };
 }
 
 export async function prepareChatConversationMemory(

@@ -9,18 +9,30 @@ const MIN_CAPTURE_TEXT_LENGTH = 80;
 
 const HIGH_VALUE_PATTERNS = [
   /正确做法/,
-  /标准(?:流程|口径|答案|规范)/,
-  /排障(?:步骤|流程|方法)/,
-  /业务规则/,
-  /FAQ/i,
-  /不是[\s\S]+而是/,
-  /补充一下/,
-  /纠正一下/,
-  /以后按这个/,
-  /最佳实践/,
+  /标准(?:流程|口径|答案|规范|操作|方案)/,
+  /(?:业务|产品|系统|权限|审核|入库|检索)规则/,
+  /排障(?:步骤|流程|方法|指南)/,
+  /故障(?:处理|排查|定位|恢复)/,
   /操作步骤/,
   /注意事项/,
+  /适用(?:场景|条件|范围)/,
+  /例外(?:情况|规则|处理)/,
+  /以后(?:都)?按(?:这个|这套|这种)/,
+  /用户(?:确认|明确|纠正|补充)/,
+  /(?:确认|补充|纠正)(?:一下|一个|一条|为)/,
+  /(?:不是|不应该是)[\s\S]{0,80}(?:而是|应该是)/,
+  /最佳实践/,
+  /知识库(?:规则|口径|标准)/,
+  /候选知识/,
+  /审核(?:规则|流程|标准)/,
+  /FAQ/i,
   /SOP/i,
+];
+
+const LOW_VALUE_PATTERNS = [
+  /^(你好|您好|hi|hello|在吗|谢谢|感谢|ok|好的|收到)[。！!.\s]*$/i,
+  /^(测试|test|随便问问|没事了)[。！!.\s]*$/i,
+  /(?:临时|先这样|暂时|这次先|可能|大概|猜测|不确定)/,
 ];
 
 export type ConversationCaptureInput = {
@@ -57,11 +69,11 @@ export async function maybeCaptureFromConversation(
     return { status: "skipped", reason: "capture_disabled" };
   }
 
-  const sourceText = buildConversationCaptureText(input, agent.name);
-  if (!shouldCapture(sourceText)) {
+  if (!shouldCapture(buildConversationCaptureSignalText(input))) {
     return { status: "skipped", reason: "low_value" };
   }
 
+  const sourceText = buildConversationCaptureText(input, agent.name);
   const extracted = await extractKnowledge(sourceText);
   if (!extracted.success || !extracted.candidates?.length) {
     return { status: "skipped", reason: "extract_empty" };
@@ -109,7 +121,22 @@ export async function maybeCaptureFromConversation(
 function shouldCapture(text: string): boolean {
   const normalized = text.replace(/\s+/g, " ").trim();
   if (normalized.length < MIN_CAPTURE_TEXT_LENGTH) return false;
+  if (LOW_VALUE_PATTERNS.some((pattern) => pattern.test(normalized))) {
+    return false;
+  }
   return HIGH_VALUE_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+
+function buildConversationCaptureSignalText(input: ConversationCaptureInput) {
+  return [
+    input.userMessage,
+    input.assistantMessage,
+    ...(input.citations ?? []).map(
+      (citation) => `${citation.title}\n${citation.content}`
+    ),
+  ]
+    .join("\n")
+    .slice(0, CAPTURE_TEXT_MAX_LENGTH);
 }
 
 function buildConversationCaptureText(
@@ -131,9 +158,9 @@ function buildConversationCaptureText(
       : "None";
 
   return [
-    "Extract reusable knowledge candidates from this agent conversation.",
+    "Extract reusable knowledge candidates from this chat conversation.",
     "Only keep stable facts, verified procedures, business rules, FAQ answers, troubleshooting steps, or user-confirmed corrections.",
-    "Do not create candidates from casual chat, uncertain guesses, or content that is only useful for this one conversation.",
+    "Do not create candidates from casual chat, uncertain guesses, temporary decisions, or content that is only useful for this one conversation.",
     "",
     `Agent: ${agentName}`,
     `Conversation ID: ${input.conversationId}`,

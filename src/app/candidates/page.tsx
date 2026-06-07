@@ -14,6 +14,8 @@ interface Candidate {
   suggested_tags: string[];
   type: string;
   status: string;
+  sourceType?: string | null;
+  documentTitle?: string | null;
 }
 
 interface KnowledgeBaseItem {
@@ -36,9 +38,10 @@ export default function CandidatesPage() {
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBaseItem[]>(
     []
   );
-  const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(
-    null
-  );
+  const [selectedCandidateId] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null;
+    return new URLSearchParams(window.location.search).get("candidateId");
+  });
 
   const router = useRouter();
 
@@ -73,13 +76,12 @@ export default function CandidatesPage() {
   };
 
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      const params = new URLSearchParams(window.location.search);
-      setSelectedCandidateId(params.get("candidateId"));
-    }
+    const frame = window.requestAnimationFrame(() => {
+      fetchCandidates();
+      fetchKnowledgeBases();
+    });
 
-    fetchCandidates();
-    fetchKnowledgeBases();
+    return () => window.cancelAnimationFrame(frame);
   }, []);
 
   // 确认入库 - 第一步：打开弹窗选择知识库

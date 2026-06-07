@@ -1,6 +1,12 @@
 "use client";
 
-import { useMemo, useRef, type ChangeEvent, type ReactNode } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  type ChangeEvent,
+  type ReactNode,
+} from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   ChevronDown,
@@ -43,8 +49,7 @@ export function ChatComposer({
   onUploadAttachments,
   onRemoveAttachment,
   onMenuOpenChange,
-  onModeChange,
-  onAgentChange,
+  onModelChange,
 }: {
   value: string;
   attachments: ChatComposerAttachment[];
@@ -63,12 +68,12 @@ export function ChatComposer({
   onUploadAttachments: (files: File[]) => void;
   onRemoveAttachment: (localId: string) => void;
   onMenuOpenChange: (open: boolean) => void;
-  onModeChange: (mode: ChatMode) => void;
-  onAgentChange: (id: string) => void;
+  onModelChange: (mode: ChatMode, agentId?: string) => void;
 }) {
   const imageInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const agentMenuScrollRef = useRef<HTMLDivElement>(null);
+  const modeMenuRef = useRef<HTMLDivElement>(null);
   const currentAgent = agents.find((agent) => agent.id === agentId);
   const modeButtonLabel =
     chatMode === "agent" && currentAgent ? currentAgent.name : currentChatMode.label;
@@ -137,6 +142,33 @@ export function ChatComposer({
     if (files.length > 0) onUploadAttachments(files);
   }
 
+  useEffect(() => {
+    if (!menuOpen) return;
+
+    function handlePointerDown(event: PointerEvent) {
+      const target = event.target;
+      if (target instanceof Node && modeMenuRef.current?.contains(target)) {
+        return;
+      }
+
+      onMenuOpenChange(false);
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        onMenuOpenChange(false);
+      }
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [menuOpen, onMenuOpenChange]);
+
   return (
     <div className="flex w-full flex-col gap-3">
       {error && (
@@ -196,7 +228,7 @@ export function ChatComposer({
 
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2">
-            <div className="relative">
+            <div ref={modeMenuRef} className="relative">
               <button
                 type="button"
                 aria-expanded={menuOpen}
@@ -246,11 +278,9 @@ export function ChatComposer({
                                 hint={item.hint}
                                 onClick={() => {
                                   if (item.type === "agent") {
-                                    onModeChange("agent");
-                                    onAgentChange(item.agentId);
+                                    onModelChange("agent", item.agentId);
                                   } else {
-                                    onModeChange(item.mode);
-                                    onAgentChange("");
+                                    onModelChange(item.mode);
                                   }
                                   onMenuOpenChange(false);
                                 }}

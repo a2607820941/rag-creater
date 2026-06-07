@@ -41,16 +41,41 @@ export async function readSseStream(
         .trim();
 
       if (!event || !dataText) continue;
-      const data = JSON.parse(dataText);
+      let data: ChatStreamEventPayloadMap[keyof ChatStreamEventPayloadMap];
+      try {
+        data = JSON.parse(dataText);
+      } catch {
+        continue;
+      }
 
-      if (event === "meta") handlers.meta(data);
-      if (event === "token") handlers.token(data);
-      if (event === "citations") handlers.citations(data);
-      if (event === "status") handlers.status(data);
-      if (event === "trace") handlers.trace(data);
-      if (event === "knowledge-files") handlers.knowledgeFiles(data);
-      if (event === "skill-draft-saved") handlers.skillDraftSaved(data);
-      if (event === "error") handlers.error(data);
+      if (event === "meta") {
+        handlers.meta(data as ChatStreamEventPayloadMap["meta"]);
+      }
+      if (event === "token") {
+        handlers.token(data as ChatStreamEventPayloadMap["token"]);
+      }
+      if (event === "citations") {
+        handlers.citations(data as ChatStreamEventPayloadMap["citations"]);
+      }
+      if (event === "status") {
+        handlers.status(data as ChatStreamEventPayloadMap["status"]);
+      }
+      if (event === "trace") {
+        handlers.trace(data as ChatStreamEventPayloadMap["trace"]);
+      }
+      if (event === "knowledge-files") {
+        handlers.knowledgeFiles(
+          data as ChatStreamEventPayloadMap["knowledge-files"]
+        );
+      }
+      if (event === "skill-draft-saved") {
+        handlers.skillDraftSaved(
+          data as ChatStreamEventPayloadMap["skill-draft-saved"]
+        );
+      }
+      if (event === "error") {
+        handlers.error(data as ChatStreamEventPayloadMap["error"]);
+      }
     }
   }
 }

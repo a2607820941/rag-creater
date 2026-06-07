@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import {
+  startTransition,
   useCallback,
   useEffect,
   useMemo,
@@ -9,68 +10,56 @@ import {
   useState,
 } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { PackageCheck, Plus, Sparkles, Trash2 } from "lucide-react";
+import { ArrowDown, PackageCheck, Plus, Sparkles, Trash2 } from "lucide-react";
 
 import { AdminShell } from "@/components/layout/admin-shell";
-import type {
-  ChatConversationDTO,
-  ChatMessageDTO,
-  ChatSkillDraftSaved,
-} from "@/features/chat/chat.types";
+import type { ChatConversationDTO, ChatSkillDraftSaved } from "@/features/chat/chat.types";
+import { useAppStore } from "@/store";
 
 import { ChatComposer } from "./_components/chat-composer";
 import { ConversationSidebar } from "./_components/conversation-sidebar";
 import { MessageBubble } from "./_components/message-bubble";
 import { SkillPublishDialog } from "./_components/skill-publish-dialog";
+import { useChatScroll } from "./_hooks/use-chat-scroll";
+import { useTypingQueue } from "./_hooks/use-typing-queue";
+import {
+  deleteConversationRequest,
+  fetchActiveAgents,
+  fetchConversationMessages,
+  publishSkillDraftRequest,
+  startChatStream,
+  updateConversationModelRequest,
+  uploadChatAttachment,
+} from "./_lib/chat-page-api";
 import { CHAT_MODE_OPTIONS } from "./_lib/chat-constants";
 import { readSseStream } from "./_lib/chat-sse";
 import type {
   AgentItem,
-  ChatAttachmentDTO,
   ChatComposerAttachment,
   ChatMode,
   ChatModeOption,
-  SkillPublishResponse,
   SkillPublishState,
   UiMessage,
 } from "./_lib/chat-types";
+import {
+  getFileType,
+  getMimeType,
+  isImageFileType,
+  isSkillPublishCommand,
+  toClientChatMode,
+} from "./_lib/chat-page-utils";
 
-type AgentListResponse = {
-  success: boolean;
-  data?: {
-    items: AgentItem[];
-  };
-  error?: {
-    message?: string;
-  };
-};
-
-type MessageListResponse = {
-  success: boolean;
-  data?: ChatMessageDTO[];
-};
-
-type ConversationListResponse = {
-  success: boolean;
-  data?: {
-    items: ChatConversationDTO[];
-  };
-  error?: {
-    message?: string;
-  };
-};
-
-type ChatAttachmentResponse = {
-  success: boolean;
-  data?: ChatAttachmentDTO;
-  error?: {
-    message?: string;
-  };
-};
+const TYPING_DELAY_MIN_MS = 25;
+const TYPING_DELAY_MAX_MS = 50;
+const TYPING_CHUNK_CHAR_MIN = 1;
+const TYPING_CHUNK_CHAR_MAX = 3;
+const BOTTOM_SCROLL_THRESHOLD_PX = 60;
+const OPEN_CONVERSATION_EVENT = "chat:open-conversation";
+const CREATE_EMPTY_CONVERSATION_EVENT = "chat:create-empty-conversation";
+const REFRESH_CONVERSATIONS_EVENT = "chat:refresh-conversations";
 
 export default function AgentChatPage() {
   const [agents, setAgents] = useState<AgentItem[]>([]);
-  const [conversations, setConversations] = useState<ChatConversationDTO[]>([]);
   const [agentId, setAgentId] = useState("");
   const [chatMode, setChatMode] = useState<ChatMode>("knowledge-agent");
   const [menuOpen, setMenuOpen] = useState(false);
@@ -89,13 +78,20 @@ export default function AgentChatPage() {
     useState<SkillPublishState>({ status: "idle" });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const scrollContainerRef = useRef<HTMLElement>(null);
   const localMessageIdRef = useRef(0);
   const localUploadIdRef = useRef(0);
-  const shouldAutoScrollRef = useRef(true);
   const chatAbortRef = useRef<AbortController | null>(null);
   const uploadAbortControllersRef = useRef<Map<string, AbortController>>(
     new Map()
+  );
+  const conversations = useAppStore((state) => state.chatConversations);
+  const loadConversations = useAppStore((state) => state.loadChatConversations);
+  const setConversations = useAppStore((state) => state.setChatConversations);
+  const upsertConversation = useAppStore(
+    (state) => state.upsertChatConversation
+  );
+  const removeConversation = useAppStore(
+    (state) => state.removeChatConversation
   );
 
   const currentAgent = useMemo(
@@ -119,49 +115,94 @@ export default function AgentChatPage() {
     [attachments]
   );
 
+  const appendAssistantText = useCallback((messageId: string, text: string) => {
+    if (!text) return;
+
+    startTransition(() => {
+      setMessages((prev) =>
+        prev.map((item) =>
+          item.id === messageId
+            ? { ...item, content: item.content + text }
+            : item
+        )
+      );
+    });
+  }, []);
+
+  const {
+    beginTypingSession,
+    enqueueTypingChunk,
+    markTypingStreamDone,
+    stopTypingSession,
+    waitForTypingDrain,
+  } = useTypingQueue({
+    chunkCharMax: TYPING_CHUNK_CHAR_MAX,
+    chunkCharMin: TYPING_CHUNK_CHAR_MIN,
+    delayMaxMs: TYPING_DELAY_MAX_MS,
+    delayMinMs: TYPING_DELAY_MIN_MS,
+    onAppendText: appendAssistantText,
+  });
+
   // eslint-disable-next-line react-hooks/incompatible-library -- React 19 rejects flushSync during virtual item measurement.
-  const messageVirtualizer = useVirtualizer({
-    count: messages.length,
-    getScrollElement: () => scrollContainerRef.current,
-    estimateSize: () => 128,
-    overscan: 6,
-    getItemKey: (index) => messages[index]?.id ?? index,
-    useFlushSync: false,
+  const messageVirtualizer = useVirtualizer(
+    {
+      count: messages.length,
+      getScrollElement: () => scrollContainerRef.current,
+      estimateSize: () => 128,
+      overscan: 6,
+      getItemKey: (index) => messages[index]?.id ?? index,
+      shouldAdjustScrollPositionOnItemSizeChange: () => false,
+      useFlushSync: false,
+    } as Parameters<typeof useVirtualizer>[0]
+  );
+
+  const scrollToLatest = useCallback(() => {
+    if (messages.length === 0) return;
+
+    messageVirtualizer.scrollToIndex(messages.length - 1, {
+      align: "end",
+    });
+  }, [messageVirtualizer, messages.length]);
+
+  const {
+    handleMessageScroll,
+    jumpToBottom,
+    resetScrollTracking,
+    scrollContainerRef,
+    showScrollToBottom,
+  } = useChatScroll({
+    bottomThresholdPx: BOTTOM_SCROLL_THRESHOLD_PX,
+    itemCount: messages.length,
+    scrollToLatest,
   });
 
   const fetchConversations = useCallback(() => {
-    fetch("/api/conversations?pageSize=100")
-      .then((res) => res.json())
-      .then((json: ConversationListResponse) => {
-        if (!json.success || !json.data) {
-          throw new Error(json.error?.message || "Failed to load conversations");
-        }
-        setConversations(json.data.items);
+    loadConversations({ force: true })
+      .then((items) => {
+        setConversations(items);
       })
       .catch((err) => {
         setError(
           err instanceof Error ? err.message : "Failed to load conversations"
         );
       });
-  }, []);
+  }, [loadConversations, setConversations]);
 
-  const fetchConversationMessages = useCallback((id: string) => {
-    fetch(`/api/conversations/${id}/messages`)
-      .then((res) => res.json())
-      .then((json: MessageListResponse) => {
-        if (json.success && json.data) {
-          setMessages(
-            json.data.map((message) => ({
-              id: message.id,
-              role: message.role,
-              content: message.content,
-              citations: message.citations,
-              knowledgeFiles: message.knowledgeFiles,
-            }))
-          );
-        }
-      })
-      .catch(() => undefined);
+  const loadConversationMessages = useCallback(async (id: string) => {
+    const json = await fetchConversationMessages(id);
+    if (!json?.success || !json.data) {
+      throw new Error("Failed to load conversation messages");
+    }
+
+    setMessages(
+      json.data.map((message) => ({
+        id: message.id,
+        role: message.role,
+        content: message.content,
+        citations: message.citations,
+        knowledgeFiles: message.knowledgeFiles,
+      }))
+    );
   }, []);
 
   useEffect(() => {
@@ -173,11 +214,10 @@ export default function AgentChatPage() {
       setChatMode("skill-agent");
     }
 
-    fetch("/api/agents?status=active&pageSize=100")
-      .then((res) => res.json())
-      .then((json: AgentListResponse) => {
-        if (!json.success || !json.data) {
-          throw new Error(json.error?.message || "Failed to load agents");
+    fetchActiveAgents()
+      .then((json) => {
+        if (!json?.success || !json.data) {
+          throw new Error(json?.error?.message || "Failed to load agents");
         }
 
         const items = json.data.items;
@@ -202,8 +242,52 @@ export default function AgentChatPage() {
   }, []);
 
   useEffect(() => {
-    fetchConversations();
-  }, [fetchConversations]);
+    const initialConversationId = new URLSearchParams(
+      window.location.search
+    ).get("conversationId");
+
+    loadConversations()
+      .then((items) => {
+        if (!initialConversationId) return;
+
+        const initialConversation = items.find(
+          (conversation) => conversation.id === initialConversationId
+        );
+        if (initialConversation) {
+          openConversation(initialConversation);
+        }
+      })
+      .catch((err) => {
+        setError(
+          err instanceof Error ? err.message : "Failed to load conversations"
+        );
+      });
+  }, [loadConversations]);
+
+  useEffect(() => {
+    function handleOpenConversation(event: Event) {
+      const nextConversationId = (
+        event as CustomEvent<{ conversationId?: string }>
+      ).detail?.conversationId;
+      if (!nextConversationId) return;
+
+      const conversation = conversations.find(
+        (item) => item.id === nextConversationId
+      );
+      if (conversation) {
+        openConversation(conversation);
+      }
+    }
+
+    window.addEventListener(OPEN_CONVERSATION_EVENT, handleOpenConversation);
+
+    return () => {
+      window.removeEventListener(
+        OPEN_CONVERSATION_EVENT,
+        handleOpenConversation
+      );
+    };
+  }, [conversations]);
 
   useEffect(() => {
     if (!conversationMenu) return;
@@ -217,32 +301,6 @@ export default function AgentChatPage() {
       window.removeEventListener("blur", close);
     };
   }, [conversationMenu]);
-
-  useEffect(() => {
-    if (!shouldAutoScrollRef.current || messages.length === 0) return;
-
-    const frame = window.requestAnimationFrame(() => {
-      messageVirtualizer.scrollToIndex(messages.length - 1, {
-        align: "end",
-      });
-
-      const container = scrollContainerRef.current;
-      if (container) {
-        container.scrollTop = container.scrollHeight;
-      }
-    });
-
-    return () => window.cancelAnimationFrame(frame);
-  }, [messages, messageVirtualizer]);
-
-  function handleMessageScroll() {
-    const container = scrollContainerRef.current;
-    if (!container) return;
-
-    const distanceToBottom =
-      container.scrollHeight - container.scrollTop - container.clientHeight;
-    shouldAutoScrollRef.current = distanceToBottom < 120;
-  }
 
   function uploadAttachments(files: File[]) {
     if (loading) return;
@@ -282,16 +340,12 @@ export default function AgentChatPage() {
       const formData = new FormData();
       formData.append("file", file);
 
-      const res = await fetch("/api/chat/attachments", {
-        method: "POST",
-        signal: abortController.signal,
-        body: formData,
-      });
-      const json = (await res.json().catch(() => null)) as
-        | ChatAttachmentResponse
-        | null;
+      const { response, json } = await uploadChatAttachment(
+        formData,
+        abortController.signal
+      );
 
-      if (!res.ok || !json?.success || !json.data) {
+      if (!response.ok || !json?.success || !json.data) {
         throw new Error(json?.error?.message || "Attachment upload failed");
       }
 
@@ -334,12 +388,61 @@ export default function AgentChatPage() {
     setAttachments((prev) => prev.filter((item) => item.localId !== localId));
   }
 
-  function abortPendingUploads() {
+  const abortPendingUploads = useCallback(() => {
     uploadAbortControllersRef.current.forEach((controller) =>
       controller.abort()
     );
     uploadAbortControllersRef.current.clear();
-  }
+  }, []);
+
+  useEffect(() => {
+    function handleCreateEmptyConversation(event: Event) {
+      const conversation = (
+        event as CustomEvent<{ conversation?: ChatConversationDTO }>
+      ).detail?.conversation;
+      if (!conversation) return;
+
+      chatAbortRef.current?.abort();
+      chatAbortRef.current = null;
+      stopTypingSession();
+      abortPendingUploads();
+      upsertConversation(conversation);
+      setConversationId(conversation.id);
+      setMessages([]);
+      setInput("");
+      setAttachments([]);
+      setError(null);
+      setConversationMenu(null);
+      setAgentId(conversation.agentId ?? "");
+      setChatMode(toClientChatMode(conversation.mode, conversation.agentId));
+      resetScrollTracking();
+    }
+
+    window.addEventListener(
+      CREATE_EMPTY_CONVERSATION_EVENT,
+      handleCreateEmptyConversation
+    );
+
+    return () => {
+      window.removeEventListener(
+        CREATE_EMPTY_CONVERSATION_EVENT,
+        handleCreateEmptyConversation
+      );
+    };
+  }, [
+    abortPendingUploads,
+    resetScrollTracking,
+    stopTypingSession,
+    upsertConversation,
+  ]);
+
+  useEffect(() => {
+    return () => {
+      chatAbortRef.current?.abort();
+      abortPendingUploads();
+      stopTypingSession();
+    };
+  }, [abortPendingUploads, stopTypingSession]);
 
   async function sendMessage() {
     const typedMessage = input.trim();
@@ -360,10 +463,11 @@ export default function AgentChatPage() {
 
     setError(null);
     setLoading(true);
+    stopTypingSession();
     const abortController = new AbortController();
     chatAbortRef.current = abortController;
     setInput("");
-    shouldAutoScrollRef.current = true;
+    resetScrollTracking();
     localMessageIdRef.current += 1;
     const localId = localMessageIdRef.current;
     const message =
@@ -383,9 +487,11 @@ export default function AgentChatPage() {
       citations: [],
       pending: true,
     };
+    const typingSessionId = beginTypingSession(assistantMessage.id);
     setMessages((prev) => [...prev, userMessage, assistantMessage]);
 
     if (chatMode === "agent" && !agentId) {
+      stopTypingSession();
       setMessages((prev) =>
         prev.map((item) =>
           item.id === assistantMessage.id
@@ -406,19 +512,17 @@ export default function AgentChatPage() {
 
     try {
       const attachmentIds = readyAttachments.map((attachment) => attachment.id);
-      const res = await fetch("/api/chat", {
-        method: "POST",
-        signal: abortController.signal,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const res = await startChatStream(
+        {
           message,
           conversationId,
           ...(agentId ? { agentId } : {}),
           chatMode,
           llmInterface: "openai",
           attachmentIds,
-        }),
-      });
+        },
+        abortController.signal
+      );
 
       if (!res.ok || !res.body) {
         const json = await res.json().catch(() => null);
@@ -430,13 +534,7 @@ export default function AgentChatPage() {
           if (data.conversationId) setConversationId(data.conversationId);
         },
         token: (token) => {
-          setMessages((prev) =>
-            prev.map((item) =>
-              item.id === assistantMessage.id
-                ? { ...item, content: item.content + token }
-                : item
-            )
-          );
+          enqueueTypingChunk(typingSessionId, token);
         },
         citations: (citations) => {
           setMessages((prev) =>
@@ -464,6 +562,8 @@ export default function AgentChatPage() {
           throw new Error(data.message || "Chat failed");
         },
       });
+      markTypingStreamDone(typingSessionId);
+      await waitForTypingDrain(typingSessionId);
 
       setMessages((prev) =>
         prev.map((item) =>
@@ -472,11 +572,13 @@ export default function AgentChatPage() {
       );
       setAttachments([]);
       fetchConversations();
+      window.dispatchEvent(new Event(REFRESH_CONVERSATIONS_EVENT));
     } catch (err) {
       if (
         abortController.signal.aborted ||
         (err instanceof Error && err.name === "AbortError")
       ) {
+        stopTypingSession();
         setMessages((prev) =>
           prev.map((item) =>
             item.id === assistantMessage.id
@@ -492,6 +594,7 @@ export default function AgentChatPage() {
       }
 
       const messageText = err instanceof Error ? err.message : "Chat failed";
+      stopTypingSession();
       setError(messageText);
       setMessages((prev) =>
         prev.map((item) =>
@@ -514,18 +617,20 @@ export default function AgentChatPage() {
 
   function stopMessage() {
     chatAbortRef.current?.abort();
+    stopTypingSession();
   }
 
   function startNewConversation() {
     chatAbortRef.current?.abort();
     chatAbortRef.current = null;
+    stopTypingSession();
     abortPendingUploads();
     setLoading(false);
     setConversationId(undefined);
     setMessages([]);
     setAttachments([]);
     setError(null);
-    shouldAutoScrollRef.current = true;
+    resetScrollTracking();
   }
 
   function openConversation(conversation: ChatConversationDTO) {
@@ -533,6 +638,7 @@ export default function AgentChatPage() {
 
     chatAbortRef.current?.abort();
     chatAbortRef.current = null;
+    stopTypingSession();
     abortPendingUploads();
     setConversationId(conversation.id);
     setMessages([]);
@@ -542,8 +648,52 @@ export default function AgentChatPage() {
     setConversationMenu(null);
     setAgentId(conversation.agentId ?? "");
     setChatMode(toClientChatMode(conversation.mode, conversation.agentId));
-    fetchConversationMessages(conversation.id);
-    shouldAutoScrollRef.current = true;
+    resetScrollTracking();
+    void loadConversationMessages(conversation.id).catch(() => {
+      setError("Failed to load conversation messages");
+    });
+  }
+
+  async function handleModelChange(mode: ChatMode, nextAgentId?: string) {
+    const normalizedAgentId = mode === "agent" ? nextAgentId ?? "" : "";
+
+    setChatMode(mode);
+    setAgentId(normalizedAgentId);
+
+    if (!conversationId) return;
+
+    const currentConversation = conversations.find(
+      (conversation) => conversation.id === conversationId
+    );
+    if (currentConversation) {
+      upsertConversation({
+        ...currentConversation,
+        mode,
+        agentId: normalizedAgentId || null,
+      });
+    }
+
+    try {
+      const { response, json } = await updateConversationModelRequest(
+        conversationId,
+        {
+          mode,
+          agentId: normalizedAgentId || null,
+        }
+      );
+
+      if (!response.ok || !json?.success || !json.data) {
+        throw new Error(
+          json?.error?.message || "Failed to save conversation model"
+        );
+      }
+
+      upsertConversation(json.data);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to save conversation model"
+      );
+    }
   }
 
   async function deleteConversation(id: string) {
@@ -551,15 +701,12 @@ export default function AgentChatPage() {
 
     setConversationMenu(null);
     try {
-      const res = await fetch(`/api/conversations/${id}`, {
-        method: "DELETE",
-      });
-      const json = await res.json().catch(() => null);
-      if (!res.ok || !json?.success) {
+      const { response, json } = await deleteConversationRequest(id);
+      if (!response.ok || !json?.success) {
         throw new Error(json?.error?.message || "Failed to delete conversation");
       }
 
-      setConversations((prev) => prev.filter((item) => item.id !== id));
+      removeConversation(id);
       if (conversationId === id) {
         startNewConversation();
       }
@@ -576,14 +723,11 @@ export default function AgentChatPage() {
     setError(null);
     setSkillPublishState({ status: "publishing" });
     try {
-      const res = await fetch(pendingSkillDraft.publishEndpoint, {
-        method: "POST",
-      });
-      const json = (await res.json().catch(() => null)) as
-        | SkillPublishResponse
-        | null;
+      const { response, json } = await publishSkillDraftRequest(
+        pendingSkillDraft.publishEndpoint
+      );
 
-      if (!res.ok || !json?.success || !json.data) {
+      if (!response.ok || !json?.success || !json.data) {
         throw new Error(json?.error?.message || "Skill publish failed");
       }
 
@@ -699,8 +843,9 @@ export default function AgentChatPage() {
                   onUploadAttachments={uploadAttachments}
                   onRemoveAttachment={removeAttachment}
                   onMenuOpenChange={setMenuOpen}
-                  onModeChange={setChatMode}
-                  onAgentChange={setAgentId}
+                  onModelChange={(mode, nextAgentId) => {
+                    void handleModelChange(mode, nextAgentId);
+                  }}
                 />
               </div>
             </section>
@@ -740,6 +885,21 @@ export default function AgentChatPage() {
                 </div>
               </section>
 
+              {showScrollToBottom && (
+                <div className="pointer-events-none absolute inset-x-0 bottom-28 z-10 flex justify-center px-4 md:px-8">
+                  <div className="pointer-events-auto mx-auto flex w-full max-w-5xl justify-end">
+                    <button
+                      type="button"
+                      onClick={jumpToBottom}
+                      className="inline-flex h-10 items-center gap-2 rounded-full border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 shadow-lg shadow-slate-900/10 hover:bg-slate-50"
+                    >
+                      <ArrowDown aria-hidden="true" className="size-4" />
+                      回到底部
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <footer className="relative shrink-0 px-4 pb-1 md:px-8">
                 <div className="mx-auto max-w-5xl">
                   <ChatComposer
@@ -760,8 +920,9 @@ export default function AgentChatPage() {
                     onUploadAttachments={uploadAttachments}
                     onRemoveAttachment={removeAttachment}
                     onMenuOpenChange={setMenuOpen}
-                    onModeChange={setChatMode}
-                    onAgentChange={setAgentId}
+                    onModelChange={(mode, nextAgentId) => {
+                      void handleModelChange(mode, nextAgentId);
+                    }}
                   />
                 </div>
               </footer>
@@ -797,29 +958,3 @@ export default function AgentChatPage() {
   );
 }
 
-function isSkillPublishCommand(message: string) {
-  return /^(publish|publish skill|发布|确认发布)$/i.test(message.trim());
-}
-
-function getFileType(fileName: string) {
-  const extension = fileName.split(".").pop()?.toLowerCase().trim();
-  return extension || "file";
-}
-
-function isImageFileType(fileType: string) {
-  return ["png", "jpg", "jpeg", "webp", "bmp"].includes(fileType);
-}
-
-function getMimeType(fileType: string) {
-  if (fileType === "jpg") return "image/jpeg";
-  if (isImageFileType(fileType)) return `image/${fileType}`;
-  return "application/octet-stream";
-}
-
-function toClientChatMode(mode: string, agentId: string | null): ChatMode {
-  if (agentId || mode === "agent") return "agent";
-  if (mode === "skill-agent") return "skill-agent";
-  if (mode === "openai") return "openai";
-  if (mode === "rag-openai") return "rag-openai";
-  return "knowledge-agent";
-}

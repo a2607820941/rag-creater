@@ -7,6 +7,8 @@ interface Candidate {
   suggested_category: string | null;
   suggested_tags: string[];
   type: string;
+  sourceType?: string | null;
+  documentTitle?: string | null;
 }
 
 interface Props {
@@ -32,6 +34,16 @@ const typeColors: Record<string, string> = {
   procedure: "bg-green-100 text-green-700",
   note: "bg-yellow-100 text-yellow-700",
   summary: "bg-gray-100 text-gray-700",
+};
+
+const sourceLabels: Record<string, string> = {
+  conversation: "对话沉淀",
+  file: "文档提炼",
+  manual: "手动录入",
+  text: "文本录入",
+  url: "链接导入",
+  markdown: "Markdown",
+  image: "图片解析",
 };
 
 export default function CandidateCard({
@@ -70,6 +82,11 @@ export default function CandidateCard({
             >
               {typeLabels[candidate.type] || candidate.type}
             </span>
+            {candidate.sourceType && (
+              <span className="text-xs px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700">
+                {sourceLabels[candidate.sourceType] || candidate.sourceType}
+              </span>
+            )}
             {candidate.suggested_category && (
               <span className="text-xs px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-600">
                 {candidate.suggested_category}
@@ -79,6 +96,11 @@ export default function CandidateCard({
           <h3 className="font-medium text-gray-900 mb-1">
             {candidate.title}
           </h3>
+          {candidate.documentTitle && (
+            <p className="text-xs text-gray-500 mb-1.5">
+              {candidate.documentTitle}
+            </p>
+          )}
           <p className="text-sm text-gray-600 line-clamp-3">
             {candidate.content}
           </p>

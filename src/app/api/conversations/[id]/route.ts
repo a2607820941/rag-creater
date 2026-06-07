@@ -1,7 +1,75 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 
 import { conversationIdSchema } from "@/features/chat/chat.validation";
-import { deleteChatConversation } from "@/server/services/chat-conversation.service";
+import {
+  deleteChatConversation,
+  updateChatConversationModel,
+} from "@/server/services/chat-conversation.service";
+
+const updateConversationSchema = z.object({
+  mode: z.enum(["openai", "agent", "knowledge-agent", "skill-agent", "rag-openai"]),
+  agentId: z.string().trim().min(1).nullable().optional(),
+});
+
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const parsedParams = conversationIdSchema.safeParse(await params);
+    if (!parsedParams.success) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: { code: "VALIDATION_ERROR", message: "Invalid conversation id" },
+        },
+        { status: 400 }
+      );
+    }
+
+    const parsedBody = updateConversationSchema.safeParse(
+      await request.json().catch(() => null)
+    );
+    if (!parsedBody.success) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: {
+            code: "VALIDATION_ERROR",
+            message: parsedBody.error.issues[0]?.message ?? "Invalid request",
+          },
+        },
+        { status: 400 }
+      );
+    }
+
+    const conversation = await updateChatConversationModel({
+      conversationId: parsedParams.data.id,
+      mode: parsedBody.data.mode,
+      agentId: parsedBody.data.agentId,
+    });
+
+    if (!conversation) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: { code: "NOT_FOUND", message: "Conversation not found" },
+        },
+        { status: 404 }
+      );
+    }
+
+    return NextResponse.json({ success: true, data: conversation });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Failed to update conversation";
+    return NextResponse.json(
+      { success: false, error: { code: "INTERNAL_ERROR", message } },
+      { status: 500 }
+    );
+  }
+}
 
 export async function DELETE(
   _request: NextRequest,

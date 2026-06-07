@@ -4,6 +4,7 @@ import Link from "next/link";
 import * as React from "react";
 import { ChevronDown, LibraryBig } from "lucide-react";
 
+import { AdminConversations } from "@/components/layout/admin-conversations";
 import {
   adminNavItems,
   isNavChildActive,
@@ -135,6 +136,7 @@ export function AdminSidebar({
             </div>
           );
         })}
+        {sidebarOpen && !sidebarContent ? <AdminConversations /> : null}
         {sidebarOpen && sidebarContent ? (
           <div className="mt-3 border-t border-sidebar-border pt-3">
             {sidebarContent}

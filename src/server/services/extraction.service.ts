@@ -31,6 +31,8 @@ export interface KnowledgeChunkRow {
   chunkStatus: string;
   createdAt: Date;
   updatedAt: Date;
+  sourceType?: string | null;
+  documentTitle?: string | null;
 }
 
 export interface ExtractionFromDocumentResult {
@@ -218,14 +220,31 @@ export async function extractFromDocument(
 
 // ===== 候选知识 CRUD（操作 DocumentChunk where chunkType="knowledge"） =====
 
-function knowledgeWhere() {
-  return { chunkType: "knowledge" } as const;
-}
-
 export async function listCandidates() {
   const items = await prisma.documentChunk.findMany({
     where: { chunkType: "knowledge", reviewStatus: "pending" },
     orderBy: { createdAt: "desc" },
+    select: {
+      id: true,
+      documentSourceId: true,
+      title: true,
+      content: true,
+      suggestedCategory: true,
+      suggestedTags: true,
+      chunkType: true,
+      knowledgeType: true,
+      reviewStatus: true,
+      chunkStatus: true,
+      createdAt: true,
+      updatedAt: true,
+      documentSource: {
+        select: {
+          sourceType: true,
+          title: true,
+          originalName: true,
+        },
+      },
+    },
   });
   return items.map(mapKnowledgeChunkToCandidate);
 }
@@ -288,6 +307,27 @@ export async function listCandidatesByDocument(
   const items = await prisma.documentChunk.findMany({
     where: { documentSourceId, chunkType: "knowledge" },
     orderBy: { createdAt: "desc" },
+    select: {
+      id: true,
+      documentSourceId: true,
+      title: true,
+      content: true,
+      suggestedCategory: true,
+      suggestedTags: true,
+      chunkType: true,
+      knowledgeType: true,
+      reviewStatus: true,
+      chunkStatus: true,
+      createdAt: true,
+      updatedAt: true,
+      documentSource: {
+        select: {
+          sourceType: true,
+          title: true,
+          originalName: true,
+        },
+      },
+    },
   });
   return items.map(mapKnowledgeChunkToCandidate);
 }
@@ -418,6 +458,18 @@ export async function confirmCandidates(ids: string[], knowledgeBaseIds: string[
     if (missingPairs.length > 0) {
       await prisma.knowledgeBaseDocument.createMany({ data: missingPairs });
     }
+
+    await prisma.documentSource.updateMany({
+      where: {
+        id: { in: docIds },
+        sourceType: "conversation",
+        status: "parsed",
+      },
+      data: {
+        activeStatus: "active",
+        updatedAt: new Date(),
+      },
+    });
   }
 
   const chunksForIndex = await prisma.documentChunk.findMany({
@@ -498,6 +550,11 @@ function mapKnowledgeChunkToCandidate(c: {
   chunkStatus: string;
   createdAt: Date;
   updatedAt: Date;
+  documentSource?: {
+    sourceType: string;
+    title: string;
+    originalName: string;
+  } | null;
 }) {
   let suggestedTags: string[] = [];
   try {
@@ -518,6 +575,9 @@ function mapKnowledgeChunkToCandidate(c: {
     type,
     status: c.reviewStatus ?? c.chunkStatus,
     documentSourceId: c.documentSourceId,
+    sourceType: c.documentSource?.sourceType ?? null,
+    documentTitle:
+      c.documentSource?.title ?? c.documentSource?.originalName ?? null,
     created_at: c.createdAt.toISOString(),
   };
 }

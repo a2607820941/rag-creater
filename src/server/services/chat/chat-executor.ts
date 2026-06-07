@@ -156,7 +156,7 @@ export async function executeChat(input: {
     citations: prepared.citations,
   };
   const persisted = await persistResult(conversationId, request.message, result);
-  if (request.chatMode === "agent") {
+  if (shouldCaptureConversationKnowledge(request.chatMode)) {
     void maybeCaptureFromConversation({
       conversationId,
       userMessageId: persisted.userMessageId,
@@ -176,6 +176,10 @@ export async function executeChat(input: {
     status: "completed",
   });
   emit("done", { ok: true });
+}
+
+function shouldCaptureConversationKnowledge(chatMode: DirectChatRequest["chatMode"]) {
+  return ["agent", "knowledge-agent", "rag-openai"].includes(chatMode);
 }
 
 function emitRagResult(emit: ChatStreamEmitter, citations: ChatCitation[]) {

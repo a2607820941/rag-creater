@@ -1,6 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 
-import { listChatConversations } from "@/server/services/chat-conversation.service";
+import {
+  createEmptyChatConversation,
+  listChatConversations,
+} from "@/server/services/chat-conversation.service";
+
+const createConversationSchema = z.object({
+  mode: z
+    .enum(["openai", "agent", "knowledge-agent", "skill-agent", "rag-openai"])
+    .optional(),
+  agentId: z.string().trim().min(1).optional(),
+});
 
 export async function GET(request: NextRequest) {
   try {
@@ -20,6 +31,37 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Failed to list conversations";
+    return NextResponse.json(
+      { success: false, error: { code: "INTERNAL_ERROR", message } },
+      { status: 500 }
+    );
+  }
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json().catch(() => ({}));
+    const parsed = createConversationSchema.safeParse(body);
+
+    if (!parsed.success) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: {
+            code: "INVALID_REQUEST",
+            message: parsed.error.issues[0]?.message ?? "Invalid request",
+          },
+        },
+        { status: 400 }
+      );
+    }
+
+    const conversation = await createEmptyChatConversation(parsed.data);
+
+    return NextResponse.json({ success: true, data: conversation });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Failed to create conversation";
     return NextResponse.json(
       { success: false, error: { code: "INTERNAL_ERROR", message } },
       { status: 500 }
