@@ -4,10 +4,9 @@ import { z } from "zod";
 import { fetchFeishuDocContent } from "@/lib/feishu";
 import {
   createDocument,
-  replaceTextChunksAndIndex,
+  parseDocument,
   updateDocumentStatus,
 } from "@/server/services/document.service";
-import { splitTextIntoChunks } from "@/lib/text-splitter";
 
 const importSchema = z.object({
   url: z.string().min(1, "请输入飞书文档链接"),
@@ -34,7 +33,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 创建文档记录
+    // 创建文档记录（rawContent 已就位，无磁盘文件）
     const doc = await createDocument({
       originalName: title,
       fileType: "md",
@@ -42,14 +41,11 @@ export async function POST(request: NextRequest) {
       sourceType: "url",
     });
 
-    // 1. 标记解析中
-    await updateDocumentStatus(doc.id, "parsing");
+    // 写入 rawContent，标记 uploaded，走和普通文件统一的解析路径
+    await updateDocumentStatus(doc.id, "uploaded", { rawContent: content });
 
-    // 2. 机械切分（飞书文档为纯文本，无需语义分段）
-    const chunks = splitTextIntoChunks(content);
-
-    // 3. 保存 chunks 并建立本地向量索引
-    await replaceTextChunksAndIndex(doc.id, chunks, { rawContent: content });
+    // parseDocument 内部: rawContent 已存在 → 跳过读盘 → 语义分段先试 → 失败退机械
+    const { chunkCount } = await parseDocument(doc.id);
 
     return NextResponse.json({
       success: true,
@@ -57,7 +53,7 @@ export async function POST(request: NextRequest) {
         id: doc.id,
         title: doc.originalName,
         contentLength: content.length,
-        chunkCount: chunks.length,
+        chunkCount,
       },
     });
   } catch (error) {
