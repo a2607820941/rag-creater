@@ -1,9 +1,13 @@
 "use client";
 
 import * as React from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { MessageSquare, Plus } from "lucide-react";
 
+import {
+  formatConversationMode,
+  formatConversationTime,
+} from "@/features/chat/chat-format";
 import type { ChatConversationDTO } from "@/features/chat/chat.types";
 import { useAppStore } from "@/store";
 
@@ -12,14 +16,17 @@ type ConversationCreateResponse = {
   data?: ChatConversationDTO;
 };
 
-const REFRESH_CONVERSATIONS_EVENT = "chat:refresh-conversations";
-
 export function AdminConversations() {
+  return (
+    <React.Suspense fallback={<AdminConversationsFallback />}>
+      <AdminConversationsContent />
+    </React.Suspense>
+  );
+}
+
+function AdminConversationsContent() {
   const [creating, setCreating] = React.useState(false);
-  const [activeConversationId, setActiveConversationId] = React.useState<
-    string | undefined
-  >();
-  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const router = useRouter();
   const conversations = useAppStore((state) => state.chatConversations);
   const loading = useAppStore((state) => state.chatConversationsLoading);
@@ -27,47 +34,14 @@ export function AdminConversations() {
   const upsertConversation = useAppStore(
     (state) => state.upsertChatConversation
   );
+  const activeConversationId =
+    searchParams.get("conversationId") ?? undefined;
 
   React.useEffect(() => {
     void loadConversations();
   }, [loadConversations]);
 
-  React.useEffect(() => {
-    function handleRefreshConversations() {
-      void loadConversations({ force: true });
-    }
-
-    window.addEventListener(
-      REFRESH_CONVERSATIONS_EVENT,
-      handleRefreshConversations
-    );
-
-    return () => {
-      window.removeEventListener(
-        REFRESH_CONVERSATIONS_EVENT,
-        handleRefreshConversations
-      );
-    };
-  }, [loadConversations]);
-
-  React.useEffect(() => {
-    const frame = window.requestAnimationFrame(() => {
-      setActiveConversationId(
-        new URLSearchParams(window.location.search).get("conversationId") ??
-          undefined
-      );
-    });
-
-    return () => window.cancelAnimationFrame(frame);
-  }, [pathname]);
-
   function openConversation(conversationId: string) {
-    setActiveConversationId(conversationId);
-    window.dispatchEvent(
-      new CustomEvent("chat:open-conversation", {
-        detail: { conversationId },
-      })
-    );
     router.push(`/agents/chat?conversationId=${conversationId}`);
   }
 
@@ -87,12 +61,6 @@ export function AdminConversations() {
 
       const conversation = json.data;
       upsertConversation(conversation);
-      setActiveConversationId(conversation.id);
-      window.dispatchEvent(
-        new CustomEvent("chat:create-empty-conversation", {
-          detail: { conversation },
-        })
-      );
       router.push(`/agents/chat?conversationId=${conversation.id}`);
     } finally {
       setCreating(false);
@@ -181,30 +149,12 @@ export function AdminConversations() {
   );
 }
 
-function formatConversationTime(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-
-  const now = new Date();
-  const sameDay = date.toDateString() === now.toDateString();
-
-  if (sameDay) {
-    return date.toLocaleTimeString(undefined, {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  }
-
-  return date.toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-  });
-}
-
-function formatConversationMode(mode: string) {
-  if (mode === "knowledge-agent") return "Knowledge Agent";
-  if (mode === "openai" || mode === "rag-openai") return "LLM";
-  if (mode === "skill-agent") return "Skill Agent";
-  if (mode === "agent") return "Agent";
-  return mode;
+function AdminConversationsFallback() {
+  return (
+    <section className="mt-3 border-t border-sidebar-border pt-3">
+      <div className="px-2 py-5 text-center text-xs leading-5 text-sidebar-foreground/60">
+        Loading conversations...
+      </div>
+    </section>
+  );
 }

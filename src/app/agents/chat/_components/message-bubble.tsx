@@ -10,6 +10,7 @@ import {
   Copy,
   FileText,
   Image as ImageIcon,
+  Loader2,
   User,
 } from "lucide-react";
 
@@ -32,6 +33,8 @@ import type { UiMessage } from "../_lib/chat-types";
 
 export function MessageBubble({ message }: { message: UiMessage }) {
   const isUser = message.role === "user";
+  const isAssistantLoading =
+    !isUser && message.status === "loading" && !message.content;
   const [copied, setCopied] = useState(false);
 
   async function copyAnswer() {
@@ -65,7 +68,15 @@ export function MessageBubble({ message }: { message: UiMessage }) {
             )}
           </>
         ) : (
-          <AssistantMarkdown content={message.content} />
+          <>
+            {isAssistantLoading ? (
+              <AssistantLoadingMessage
+                text={message.loadingText || "\u6b63\u5728\u68c0\u7d22\u77e5\u8bc6\u5e93"}
+              />
+            ) : (
+              <AssistantMarkdown content={message.content} />
+            )}
+          </>
         )}
         {!isUser && message.knowledgeFiles && message.knowledgeFiles.length > 0 && (
           <KnowledgeFilesNotice files={message.knowledgeFiles} />
@@ -97,6 +108,23 @@ export function MessageBubble({ message }: { message: UiMessage }) {
           <User aria-hidden="true" />
         </div>
       )}
+    </div>
+  );
+}
+
+function AssistantLoadingMessage({ text }: { text: string }) {
+  return (
+    <div
+      className="inline-flex items-center gap-2 text-sm text-slate-500"
+      aria-live="polite"
+    >
+      <Loader2 className="animate-spin text-emerald-700" aria-hidden="true" />
+      <span>{text}</span>
+      <span className="inline-flex items-center gap-1" aria-hidden="true">
+        <span className="size-1.5 rounded-full bg-emerald-600/70 [animation-delay:0ms] animate-bounce" />
+        <span className="size-1.5 rounded-full bg-emerald-600/70 [animation-delay:120ms] animate-bounce" />
+        <span className="size-1.5 rounded-full bg-emerald-600/70 [animation-delay:240ms] animate-bounce" />
+      </span>
     </div>
   );
 }
