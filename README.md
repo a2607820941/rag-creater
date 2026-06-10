@@ -1,209 +1,361 @@
-# RAG Creater
+# RAG Creater - AI 知识库管理平台
 
-这是一个基于 Next.js App Router 的全栈 RAG 应用项目，用于后续构建 RAG 生成、管理与 Agent 消费相关能力。
+一个基于 Next.js App Router 的全栈 AI 知识库管理平台，支持知识生产、知识管理、知识检索和知识消费的完整闭环。
 
-## 技术栈
+## 项目介绍
 
-- Next.js 16.2.6
-- React 19.2.4
-- TypeScript
-- Tailwind CSS 4
-- ESLint
+RAG Creater 是一个功能完整的 AI 知识库管理系统，旨在帮助企业和团队高效管理知识资产。平台提供从知识生产到消费的全流程支持，包括：
 
-## 项目启动
+- **知识生产**：支持手动录入、文件上传、飞书导入和 AI 自动提炼等多种知识来源
+- **知识管理**：提供知识库管理、知识条目 CRUD、审核、状态管理和权限控制
+- **知识检索**：支持关键词检索、语义检索、多知识库聚合检索
+- **知识消费**：基于知识库的 AI 对话、专家 Agent 和后续 Skill/SDK 扩展
 
-首次拉取项目后安装依赖：
+平台采用现代化技术栈，具备良好的可扩展性和可维护性，适合中小型团队快速搭建智能知识管理系统。
+
+## 主要功能
+
+### 1. 知识库管理
+- 创建、编辑、删除知识库
+- 知识库配置管理（分块大小、相似度阈值、TopK 等）
+- 知识库状态管理（活跃、禁用）
+- 标签和分类管理
+
+### 2. 知识条目管理
+- 知识条目的完整生命周期管理（创建、编辑、删除、详情查看）
+- 知识状态管理：可用、不可用、待确认
+- 知识来源追踪：手动录入、文档导入、AI 提炼、对话沉淀
+- 批量启用、批量停用能力
+- 使用次数统计和热度排行
+
+### 3. 文档导入管线
+- 支持多种文件格式：TXT、Markdown、DOCX、文本型 PDF、图片（OCR）
+- 文件上传和解析状态管理
+- 解析文本预览
+- 文档状态机管理（上传中、解析中、已解析、失败）
+
+### 4. AI 知识提炼
+- 从文档解析文本中提炼候选知识
+- 从用户粘贴材料中提炼候选知识
+- AI 输出结构化校验（Zod）
+- 候选知识预览、编辑、批量确认、拒绝
+- 审核流程管理
+
+### 5. 专家 Agent 配置
+- Agent 创建、编辑、删除、列表
+- 配置 Agent 角色、回答风格（严谨、简洁、教学、客服等）
+- 配置知识范围（全部知识、指定分类、指定标签、指定知识条目）
+- 自动生成 Agent system prompt
+- 引用展示配置
+
+### 6. AI 对话消费
+- 多轮对话消息展示
+- 用户问题输入和 AI 回答生成
+- 引用知识展示和详情查看
+- 对话历史记录
+- 流式输出支持
+
+### 7. 知识闭环与数据分析
+- 从对话回答沉淀为新知识
+- 知识被检索次数和引用次数统计
+- Dashboard 数据总览
+- 热门知识排行
+- 分类知识数量统计
+- 知识缺口识别
+
+### 8. RAG 检索能力
+- 关键词检索
+- 语义检索
+- 多知识库聚合检索
+- Prompt 组装
+- 大模型调用
+- 引用来源返回
+
+### 9. 审核流程
+- AI 自动生成知识默认进入待审核状态
+- 管理员审核通过后进入正式知识库
+- 审核状态管理（待审核、已通过、已驳回）
+
+## 开发技术栈
+
+### 前端技术
+- **Next.js 16.2.6** - React 全栈框架（App Router）
+- **React 19.2.4** - 用户界面库
+- **TypeScript** - 类型安全的 JavaScript
+- **Tailwind CSS 4** - 实用优先的 CSS 框架
+- **shadcn/ui** - UI 组件库
+- **Zustand 5.0.14** - 前端状态管理
+- **Lucide React** - 图标库
+
+### 后端技术
+- **Next.js API Routes** - 后端接口
+- **Prisma 7.8.0** - 数据库 ORM 和类型生成
+- **SQLite** - 本地数据库
+- **Zod 4.4.3** - 数据校验
+
+### AI 与文档处理
+- **pdf-parse** - PDF 文档解析
+- **mammoth** - DOCX 文档解析
+- **tesseract.js** - OCR 图片文字识别
+- **xlsx** - Excel 文件处理
+- **iconv-lite & jschardet** - 字符编码处理
+
+### 开发工具
+- **ESLint** - 代码检查
+- **PostCSS** - CSS 处理工具
+- **TypeScript** - 类型检查
+
+## 快速开始
+
+### 环境要求
+
+- Node.js 18.0 或更高版本
+- npm 9.0 或更高版本
+- 操作系统：Windows、macOS 或 Linux
+
+### 1. 克隆项目
+
+```bash
+git clone <项目仓库地址>
+cd rag-creater-main
+```
+
+### 2. 安装依赖
 
 ```bash
 npm install
 ```
 
-启动本地开发服务：
+### 3. 环境配置
+
+创建 `.env` 文件并配置以下环境变量：
+
+```env
+# 数据库连接（SQLite）
+DATABASE_URL="file:./dev.db"
+
+# AI 模型 API Key（根据使用的 AI 服务配置）
+OPENAI_API_KEY="your_openai_api_key"
+# 或其他 AI 服务的 API Key
+```
+
+### 4. 数据库初始化
+
+```bash
+# 生成 Prisma Client
+npm run db:generate
+
+# 同步数据库 schema 到本地 SQLite
+npm run db:push
+```
+
+### 5. 启动开发服务器
 
 ```bash
 npm run dev
 ```
 
-默认访问地址：
+默认访问地址：http://localhost:3000
 
-```txt
-http://localhost:3000
-```
-
-Next.js 开发服务默认使用 `3000` 端口。如果该端口被占用，Next.js 会提示或切换到其他可用端口，请以终端输出为准。
+如果端口 3000 被占用，Next.js 会自动切换到其他可用端口，请以终端输出为准。
 
 ## 常用命令
 
 ```bash
+# 开发环境
 npm run dev
-```
 
-启动开发环境。
-
-```bash
+# 构建生产版本
 npm run build
-```
 
-构建生产版本，并执行 TypeScript 与 Next.js 构建检查。
-
-```bash
+# 启动生产服务
 npm run start
-```
 
-启动生产构建后的服务。使用前需要先执行 `npm run build`。
-
-```bash
+# 代码检查
 npm run lint
-```
 
-运行 ESLint 代码检查。
+# 数据库相关
+npm run db:generate    # 生成 Prisma Client
+npm run db:push        # 同步 schema 到数据库
+npm run db:studio      # 打开 Prisma Studio 数据库管理界面
+```
 
 ## 目录结构
 
 ```txt
-src/
-  app/          # Next.js App Router 路由层
-  components/   # 项目通用组件
-  features/     # 按业务领域拆分的功能模块
-  lib/          # 通用工具函数、适配器、SDK 封装
-  server/       # 服务端代码，例如数据库、鉴权、业务服务
-  types/        # 全局 TypeScript 类型
-  config/       # 应用配置、常量
-public/         # 静态资源目录
+rag-creater-main/
+├── src/
+│   ├── app/                    # Next.js App Router 路由层
+│   │   ├── agents/             # 专家 Agent 页面
+│   │   ├── api/                # API 接口
+│   │   ├── candidates/         # 候选知识页面
+│   │   ├── dashboard/          # 数据看板页面
+│   │   ├── documents/          # 文档管理页面
+│   │   ├── extraction/         # 知识提炼页面
+│   │   ├── knowledge-bases/    # 知识库管理页面
+│   │   ├── note/               # 笔记页面
+│   │   ├── skills/             # 技能管理页面
+│   │   ├── layout.tsx          # 根布局
+│   │   ├── page.tsx            # 首页
+│   │   └── globals.css         # 全局样式
+│   ├── components/             # 通用 UI 组件
+│   │   └── ui/                 # shadcn/ui 组件
+│   ├── features/               # 业务功能模块
+│   │   ├── agent/              # 专家 Agent 模块
+│   │   ├── analytics/          # 数据分析模块
+│   │   ├── chat/               # 对话模块
+│   │   ├── document/           # 文档模块
+│   │   ├── extraction/         # 知识提炼模块
+│   │   ├── feishu/             # 飞书导入模块
+│   │   ├── knowledge/          # 知识管理模块
+│   │   ├── knowledge-bases/    # 知识库模块
+│   │   ├── note/               # 笔记模块
+│   │   ├── rag/                # RAG 检索模块
+│   │   └── skill/              # 技能模块
+│   ├── lib/                    # 通用工具函数和基础能力
+│   ├── server/                 # 服务端代码
+│   ├── store/                  # Zustand 状态管理
+│   ├── types/                  # TypeScript 类型定义
+│   └── generated/              # Prisma 生成的客户端（勿手动修改）
+├── prisma/
+│   ├── schema.prisma           # 数据库 schema
+│   └── dev.db                  # 本地 SQLite 数据库
+├── public/                     # 静态资源
+├── docs/                       # 项目文档
+├── package.json                # 项目配置
+├── tsconfig.json               # TypeScript 配置
+├── next.config.ts              # Next.js 配置
+└── README.md                   # 项目说明
 ```
 
-## 目录说明
+## 参与协作者
 
-### `src/app`
+本项目由 7 位成员协作开发，每位成员负责一个独立的功能模块：
 
-Next.js App Router 的路由目录。页面、布局、加载状态、错误边界和 API Route Handler 都放在这里。
+| 成员 | 负责模块 | 主要职责 |
+|------|----------|----------|
+| **成员 曾不遗忘四月风** | 知识生命周期管理 | 知识条目的创建、编辑、删除、状态流转、来源追踪 |
+| **成员 Camille** | 轻量知识检索与组织 | 分类管理、标签管理、关键词搜索、LLM 重排 |
+| **成员 zsh** | 文档导入管线 | 文件上传、文档解析、状态机管理、文本预览 |
+| **成员 慕云离秋** | AI 知识提炼与审核流 | AI 提炼 Prompt 设计、候选知识生成、审核流程 |
+| **成员 Paxton** | 专家 Agent 配置与生成 | Agent 角色配置、知识范围约束、Prompt 编排 |
+| **成员 半个西瓜** | Agent 问答消费与引用 | 多轮对话、上下文组装、引用展示 |
+| **成员 五张📃** | 知识闭环与数据分析 | 对话沉淀、热度统计、Dashboard 可视化 |
 
-常见文件约定：
+### 协作分工原则
 
-- `page.tsx`：页面入口
-- `layout.tsx`：布局组件
-- `loading.tsx`：加载状态
-- `error.tsx`：错误边界
-- `not-found.tsx`：404 页面
-- `route.ts`：API 接口
+1. **功能导向分工**：每位成员负责一个可独立演示的功能模块
+2. **全栈覆盖**：每个模块都包含前端页面、后端接口、数据模型和联调
+3. **清晰协作**：模块之间有明确的接口约定和数据流转
+4. **知识闭环**：从知识生产到消费再到沉淀的完整循环
 
-示例：
+### 核心依赖链
 
-```txt
-src/app/page.tsx                # /
-src/app/documents/page.tsx      # /documents
-src/app/api/rag-management/documents/route.ts  # /api/rag-management/documents
+```text
+知识管理（成员 A、B）
+    ↓
+知识生产（成员 C、D）
+    ↓
+知识消费（成员 E、F）
+    ↓
+知识沉淀（成员 G）
 ```
 
-### `src/components`
+## 数据库模型
 
-项目级通用组件目录。这里放多个页面或多个功能模块都会复用的组件。
+项目使用 Prisma 管理数据库，主要数据模型包括：
 
-本项目计划使用外部组件库，因此不单独创建 `ui/` 目录来维护基础 UI 组件。
+- **KnowledgeBase** - 知识库
+- **DocumentSource** - 文档来源
+- **DocumentChunk** - 文档分块
+- **KnowledgeCategory** - 知识分类
+- **KnowledgeTag** - 知识标签
+- **ExpertAgent** - 专家 Agent
+- **ChatConversation** - 对话会话
+- **ChatMessage** - 对话消息
+- **Skill** - 技能配置
+- **UsageLog** - 使用日志
 
-### `src/features`
+详细的数据库结构请查看 `prisma/schema.prisma` 文件。
 
-业务功能模块目录。建议按业务领域拆分，例如：
+## API 接口
 
-```txt
-src/features/documents/
-src/features/agents/
-src/features/rag/
+项目提供 RESTful API 接口，主要包括：
+
+- `/api/knowledge-bases` - 知识库管理
+- `/api/documents` - 文档管理
+- `/api/knowledge` - 知识条目管理
+- `/api/agents` - 专家 Agent 管理
+- `/api/chat` - 对话接口
+- `/api/rag` - RAG 检索接口
+- `/api/analytics` - 数据分析接口
+- `/api/ai` - AI 提炼接口
+
+详细的 API 文档请查看 `docs/` 目录下的相关文档。
+
+## 注意事项
+
+### 开发注意事项
+
+1. **数据库修改**：修改 Prisma schema 后，需要运行 `npm run db:generate` 和 `npm run db:push`
+2. **环境变量**：不要提交 `.env`、`.env.local` 等包含敏感信息的文件
+3. **生成代码**：不要手动修改 `src/generated/prisma/` 目录下的文件
+4. **类型安全**：所有业务代码使用 TypeScript 编写，确保类型安全
+5. **代码规范**：使用 ESLint 进行代码检查，遵循项目编码规范
+
+### 架构约定
+
+1. **App Router**：使用 Next.js App Router，不使用旧的 `pages` 路由
+2. **状态管理**：使用 Zustand 分片模式组织全局状态
+3. **数据校验**：使用 Zod 进行表单、接口入参和环境变量校验
+4. **UI 组件**：优先使用 shadcn/ui 组件，保持风格统一
+5. **业务逻辑**：复杂业务逻辑放在 `features/` 目录，保持页面组件轻量
+
+### 安全注意事项
+
+1. **权限控制**：后端接口必须校验权限，不能只依赖前端隐藏按钮
+2. **敏感信息**：不要在代码中硬编码 API Key、数据库密码等敏感信息
+3. **输入校验**：所有用户输入必须进行校验和过滤
+4. **知识审核**：AI 生成的知识默认进入待审核状态，避免错误知识污染知识库
+
+### 性能优化
+
+1. **数据库索引**：Prisma schema 中已为常用查询字段添加索引
+2. **分页查询**：列表接口支持分页，避免一次性加载大量数据
+3. **缓存策略**：合理使用 Next.js 缓存机制
+4. **流式输出**：AI 对话支持流式输出，提升用户体验
+
+## 常见问题
+
+### Q: 如何添加新的知识来源？
+
+A: 在 `features/` 目录下创建新的模块，实现对应的解析逻辑，并在文档导入管线中集成。
+
+### Q: 如何修改 AI 提炼的 Prompt？
+
+A: 在 `features/extraction/` 目录下找到对应的 Prompt 模板进行修改。
+
+### Q: 如何添加新的 Agent 回答风格？
+
+A: 在 Agent 配置模块中添加新的风格选项，并在 Prompt 生成逻辑中处理。
+
+### Q: 数据库迁移如何处理？
+
+A: 使用 Prisma 的迁移命令：
+```bash
+npx prisma migrate dev --name 迁移名称
 ```
 
-页面入口应尽量保持轻量，复杂业务组件和业务逻辑优先放到对应的 `features` 模块中。
+## 相关文档
 
-### `src/lib`
+- [分工报告](docs/分工.md) - 详细的 7 人分工说明
+- [技术文档](docs/) - 各模块技术文档
+- [API 对接文档](docs/) - 接口对接说明
 
-通用工具与基础封装目录，例如：
+## 许可证
 
-- 字符串、日期、格式化工具
-- 第三方 SDK 初始化
-- 通用 fetch/client 封装
-- 与具体业务无关的辅助函数
+本项目仅供学习和内部使用。
 
-### `src/server`
+## 联系方式
 
-服务端专用代码目录，例如：
-
-- 数据库连接
-- 鉴权逻辑
-- 服务端业务服务
-- 只能在服务端运行的工具函数
-
-不要把需要在浏览器中运行的代码放进这里。
-
-### `src/types`
-
-全局 TypeScript 类型目录。适合放跨模块共享的类型定义。
-
-### `src/config`
-
-应用配置和常量目录，例如站点名称、分页配置、模型配置、环境变量读取封装等。
-
-### `public`
-
-静态资源目录。放在这里的文件可以通过站点根路径访问。
-
-示例：
-
-```txt
-public/logo.png
-```
-
-访问路径：
-
-```txt
-/logo.png
-```
-
-## 路由说明
-
-本项目使用 Next.js 的 App Router，不使用旧的 `pages` 路由目录。
-
-App Router 的核心规则是：
-
-- `src/app` 下的文件夹决定 URL 路径
-- `page.tsx` 让该路径成为页面
-- `route.ts` 让该路径成为 API 接口
-- `layout.tsx` 为当前目录及其子目录提供共享布局
-
-例如：
-
-```txt
-src/app/projects/page.tsx
-```
-
-对应页面：
-
-```txt
-/projects
-```
-
-动态路由使用方括号：
-
-```txt
-src/app/projects/[id]/page.tsx
-```
-
-对应：
-
-```txt
-/projects/1
-/projects/abc
-```
-
-## 数据库的修改
-
-```
-# 1. 修改 prisma/schema.prisma
-
-# 2. 创建并执行数据库迁移
-npx prisma migrate dev --name 本次修改的名字
-
-# 3. 重新生成 Prisma Client
-npx prisma generate
-
-# 4. 重启 Next.js 开发服务
-npm run dev
-```
+如有问题或建议，请联系项目维护者。
