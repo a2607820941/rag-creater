@@ -5,6 +5,7 @@ import type {
   RagIconName,
   RagListItem,
   RagStatus,
+  RagTag,
   SortDirection,
   SortField,
   StatusFilter,
@@ -78,6 +79,34 @@ export function createClientId() {
   return `kb-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function normalizeRagTags(value: unknown): RagTag[] {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .flatMap((tag): RagTag[] => {
+      if (!isRecord(tag)) return [];
+
+      const id = toStringValue(tag.id, "");
+      const name = toStringValue(tag.name, "");
+
+      if (!id || !name) return [];
+
+      return [
+        {
+          id,
+          name,
+          color: typeof tag.color === "string" ? tag.color : null,
+          sortOrder: toNumberValue(tag.sortOrder, 0),
+          createdAt:
+            typeof tag.createdAt === "string" ? tag.createdAt : undefined,
+          updatedAt:
+            typeof tag.updatedAt === "string" ? tag.updatedAt : undefined,
+        },
+      ];
+    })
+    .sort((left, right) => left.sortOrder - right.sortOrder);
+}
+
 export function normalizeRagItem(input: unknown): RagListItem {
   const item = isRecord(input) ? input : {};
 
@@ -91,6 +120,7 @@ export function normalizeRagItem(input: unknown): RagListItem {
     knowledgeCount: toNumberValue(item.knowledgeCount, 0),
     topK: toNumberValue(item.topK, 0),
     similarityThreshold: toNumberValue(item.similarityThreshold, 0),
+    tags: normalizeRagTags(item.tags),
     status: toStatus(item.status),
     updatedAt: toStringValue(item.updatedAt, "--"),
   };
@@ -129,7 +159,8 @@ export function filterAndSortRagItems(params: {
 
       return (
         item.name.toLowerCase().includes(keyword) ||
-        item.description.toLowerCase().includes(keyword)
+        item.description.toLowerCase().includes(keyword) ||
+        item.tags.some((tag) => tag.name.toLowerCase().includes(keyword))
       );
     })
     .filter((item) => {
@@ -163,11 +194,9 @@ export function validateKnowledgeBaseForm(params: {
   if (!Number.isInteger(params.values.topK) || params.values.topK <= 0) {
     return "TopK 必须为正整数";
   }
-  if (
-    params.values.similarityThreshold < 0 ||
-    params.values.similarityThreshold > 1
-  ) {
-    return "相似度阈值必须在 0 到 1 之间";
+
+  if (params.values.tagIds.length > 10) {
+    return "单个知识库最多绑定 10 个标签";
   }
 
   const duplicated = params.items.some(

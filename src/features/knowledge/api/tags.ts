@@ -28,6 +28,7 @@ type ApiResponse<T> = ApiSuccess<T> | ApiFailure;
 /** 标签列表查询参数。 */
 export type TagListParams = {
   keyword?: string;
+  scope?: "all" | "rag";
 };
 
 /** 拉取标签列表。 */
@@ -36,6 +37,7 @@ export async function fetchTags(
 ): Promise<KnowledgeTagDto[]> {
   const searchParams = new URLSearchParams();
   if (params.keyword) searchParams.set("keyword", params.keyword);
+  if (params.scope) searchParams.set("scope", params.scope);
 
   const queryString = searchParams.toString();
   return requestJson<KnowledgeTagDto[]>(

@@ -65,6 +65,11 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { createTag, fetchTags } from "@/features/knowledge/api/tags";
+import type {
+  KnowledgeTagDto,
+  KnowledgeTagFormValues,
+} from "@/features/knowledge/types";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/store";
@@ -74,6 +79,9 @@ import {
   fetchRagItems,
   updateKnowledgeBase,
 } from "./api";
+import { CreateKnowledgeBaseTagDialog } from "@/features/knowledge-bases/components/create-knowledge-base-tag-dialog";
+import { KnowledgeBaseTagBadge } from "@/features/knowledge-bases/components/knowledge-base-tag-badge";
+import { KnowledgeBaseTagEditor } from "@/features/knowledge-bases/components/knowledge-base-tag-editor";
 import { KnowledgeDocumentsDialog } from "@/features/knowledge-bases/components/knowledge-documents-dialog";
 import { mockRagItems } from "./mock-data";
 import {
@@ -182,6 +190,11 @@ export function RagManage() {
   const [formSubmitting, setFormSubmitting] = useState(false);
   const [deleteSubmitting, setDeleteSubmitting] = useState(false);
   const [documentsDialogOpen, setDocumentsDialogOpen] = useState(false);
+  const [allTags, setAllTags] = useState<KnowledgeTagDto[]>([]);
+  const [tagsLoading, setTagsLoading] = useState(false);
+  const [tagDialogOpen, setTagDialogOpen] = useState(false);
+  const [tagSubmitting, setTagSubmitting] = useState(false);
+  const [tagError, setTagError] = useState<string | null>(null);
 
   useEffect(() => {
     let ignore = false;
@@ -213,7 +226,30 @@ export function RagManage() {
       }
     }
 
+    async function loadTags() {
+      setTagsLoading(true);
+
+      try {
+        const data = await fetchTags({ scope: "rag" });
+
+        if (!ignore) {
+          setAllTags(data);
+        }
+      } catch (loadError) {
+        console.warn("Failed to load knowledge tags.", loadError);
+
+        if (!ignore) {
+          setTagError("标签数据加载失败");
+        }
+      } finally {
+        if (!ignore) {
+          setTagsLoading(false);
+        }
+      }
+    }
+
     loadRagItems();
+    loadTags();
 
     return () => {
       ignore = true;
@@ -254,6 +290,7 @@ export function RagManage() {
       icon: normalizeRagIcon(item.icon),
       topK: item.topK,
       similarityThreshold: item.similarityThreshold,
+      tagIds: item.tags.map((tag) => tag.id),
       status: item.status,
     });
     setFormError(null);
@@ -296,8 +333,8 @@ export function RagManage() {
         description: formValues.description.trim() || undefined,
         icon: formValues.icon,
         topK: formValues.topK,
-        similarityThreshold: formValues.similarityThreshold,
         status: formValues.status,
+        tagIds: formValues.tagIds,
       };
 
       if (formDialogMode === "create") {
@@ -320,6 +357,25 @@ export function RagManage() {
       setFormError("知识库保存失败，请稍后重试");
     } finally {
       setFormSubmitting(false);
+    }
+  }
+
+  async function handleCreateTag(values: KnowledgeTagFormValues) {
+    setTagSubmitting(true);
+    setTagError(null);
+
+    try {
+      const created = await createTag(values);
+      setAllTags((current) => [...current, created]);
+      setFormValues((current) => ({
+        ...current,
+        tagIds: [...new Set([...current.tagIds, created.id])],
+      }));
+      setTagDialogOpen(false);
+    } catch (error) {
+      setTagError(error instanceof Error ? error.message : "创建标签失败");
+    } finally {
+      setTagSubmitting(false);
     }
   }
 
@@ -525,8 +581,8 @@ export function RagManage() {
           const KnowledgeBaseIcon = RAG_ICON_COMPONENTS[iconOption.value];
           const statusClassName =
             item.status === "active"
-              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-              : "border-red-200 bg-red-50 text-red-700";
+              ? "h-7 border-emerald-200 bg-emerald-50 px-2.5 text-[13px] font-semibold text-emerald-700"
+              : "h-7 border-red-200 bg-red-50 px-2.5 text-[13px] font-semibold text-red-700";
 
           return (
             <Card
@@ -543,11 +599,11 @@ export function RagManage() {
                 }
               }}
             >
-              <CardHeader>
+              <CardHeader className="px-4 pt-4 pb-2">
                 <CardTitle className="flex items-start gap-3">
                   <span
                     className={cn(
-                      "flex size-10 shrink-0 items-center justify-center rounded-md",
+                      "flex size-9 shrink-0 items-center justify-center rounded-md",
                       iconOption.className
                     )}
                   >
@@ -555,7 +611,7 @@ export function RagManage() {
                   </span>
                   <span className="min-w-0">
                     <span className="block truncate">{item.name}</span>
-                    <CardDescription className="mt-1 line-clamp-2">
+                    <CardDescription className="mt-0.5 line-clamp-2 text-xs leading-5">
                       {item.description}
                     </CardDescription>
                   </span>
@@ -566,15 +622,27 @@ export function RagManage() {
                   </Badge>
                 </CardAction>
               </CardHeader>
-              <CardContent className="flex flex-col gap-3 p-4 pt-0">
-                <div className="grid grid-cols-2 gap-2 text-sm">
+              <CardContent className="flex flex-col gap-2 px-4 pb-3 pt-0">
+                <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-[15px] font-semibold text-foreground">
                   <div>文档：{item.documentCount}</div>
                   <div>Chunks：{item.chunkCount}</div>
                   <div>TopK：{item.topK}</div>
-                  <div>阈值：{item.similarityThreshold}</div>
+                </div>
+                <div className="flex h-[52px] flex-wrap content-start gap-1.5 overflow-hidden">
+                  {item.tags.length > 0 ? (
+                    item.tags
+                      .slice(0, 5)
+                      .map((tag) => (
+                        <KnowledgeBaseTagBadge key={tag.id} tag={tag} />
+                      ))
+                  ) : (
+                    <span className="text-xs text-muted-foreground">
+                      暂无标签
+                    </span>
+                  )}
                 </div>
               </CardContent>
-              <CardFooter className="justify-between gap-3">
+              <CardFooter className="justify-between gap-3 px-4 pb-4 pt-0">
                 <span className="text-xs text-muted-foreground">
                   更新时间：{formatDate(item.updatedAt)}
                 </span>
@@ -697,31 +765,26 @@ export function RagManage() {
                   }
                 />
               </div>
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="kb-threshold">相似度阈值</Label>
-                <Input
-                  id="kb-threshold"
-                  type="number"
-                  min={0}
-                  max={1}
-                  step={0.01}
-                  value={formValues.similarityThreshold}
-                  onChange={(event) =>
-                    updateFormValue(
-                      "similarityThreshold",
-                      Number(event.target.value)
-                    )
-                  }
-                />
-              </div>
+
             </div>
 
-            <div className="flex items-center justify-between gap-3 rounded-md border border-border p-3">
-              <div className="flex flex-col gap-1">
+            <KnowledgeBaseTagEditor
+              allTags={allTags}
+              selectedTagIds={formValues.tagIds}
+              disabled={formSubmitting || tagsLoading}
+              onChange={(tagIds) => updateFormValue("tagIds", tagIds)}
+              onCreateClick={() => {
+                setTagError(null);
+                setTagDialogOpen(true);
+              }}
+            />
+
+            <div className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2">
+              <div className="min-w-0">
                 <Label htmlFor="kb-status">启用状态</Label>
-                <span className="text-xs text-muted-foreground">
-                  开启后该知识库可用于后续检索。
-                </span>
+                <div className="mt-0.5 text-xs text-muted-foreground">
+                  关闭后该知识库不参与检索
+                </div>
               </div>
               <Switch
                 id="kb-status"
@@ -747,6 +810,17 @@ export function RagManage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <CreateKnowledgeBaseTagDialog
+        open={tagDialogOpen}
+        submitting={tagSubmitting}
+        error={tagError}
+        onOpenChange={(open) => {
+          setTagDialogOpen(open);
+          if (!open) setTagError(null);
+        }}
+        onSubmit={handleCreateTag}
+      />
 
       <AlertDialog
         open={Boolean(deleteTarget)}

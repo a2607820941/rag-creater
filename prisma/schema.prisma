@@ -29,6 +29,7 @@ model KnowledgeBase {
   updatedAt DateTime @updatedAt
 
   documents KnowledgeBaseDocument[]
+  tags      KnowledgeBaseTag[]
 
   @@index([status])
 }
@@ -202,8 +203,25 @@ model KnowledgeTag {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  knowledgeBases KnowledgeBaseTag[]
+
   @@index([sortOrder])
   @@index([createdAt])
+}
+
+model KnowledgeBaseTag {
+  id              String @id @default(cuid())
+  knowledgeBaseId String
+  tagId           String
+
+  createdAt DateTime @default(now())
+
+  knowledgeBase KnowledgeBase @relation(fields: [knowledgeBaseId], references: [id], onDelete: Cascade)
+  tag           KnowledgeTag  @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@unique([knowledgeBaseId, tagId])
+  @@index([knowledgeBaseId])
+  @@index([tagId])
 }
 
 model ExpertAgent {

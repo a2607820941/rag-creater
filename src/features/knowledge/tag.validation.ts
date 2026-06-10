@@ -9,7 +9,7 @@ const tagNameSchema = z
   .string()
   .trim()
   .min(1, "标签名称不能为空")
-  .max(30, "标签名称不能超过 30 个字符");
+  .max(8, "标签名称不能超过 8 个字符");
 
 /** 校验标签颜色并把空字符串归一化为 null。 */
 const optionalColorSchema = z.preprocess(
@@ -41,6 +41,7 @@ export const tagListQuerySchema = z.object({
     .max(50, "搜索关键词不能超过 50 个字符")
     .optional()
     .transform((value) => (value ? value : undefined)),
+  scope: z.enum(["all", "rag"]).optional().default("all"),
 });
 
 /** 校验标签路径参数 id。 */

@@ -60,7 +60,7 @@ export function TagForm({
           </span>
           <input
             value={name}
-            maxLength={30}
+            maxLength={8}
             required
             disabled={submitting}
             onChange={(event) => setName(event.target.value)}

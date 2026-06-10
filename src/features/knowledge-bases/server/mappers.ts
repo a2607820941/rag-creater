@@ -9,11 +9,23 @@ type KnowledgeBaseListRecord = {
   status: string;
   createdAt: Date;
   updatedAt: Date;
+  tags?: KnowledgeBaseTagRecord[];
   documents: {
     document: {
       chunks: { id: string }[];
     } | null;
   }[];
+};
+
+type KnowledgeBaseTagRecord = {
+  tag: {
+    id: string;
+    name: string;
+    color: string | null;
+    sortOrder: number;
+    createdAt: Date;
+    updatedAt: Date;
+  };
 };
 
 type DocumentChunkRecord = {
@@ -89,6 +101,26 @@ export function mapDocumentChunk(chunk: DocumentChunkRecord) {
   };
 }
 
+function mapKnowledgeBaseTags(tags: KnowledgeBaseTagRecord[] = []) {
+  return tags
+    .map((relation) => relation.tag)
+    .sort((left, right) => {
+      if (left.sortOrder !== right.sortOrder) {
+        return left.sortOrder - right.sortOrder;
+      }
+
+      return left.createdAt.getTime() - right.createdAt.getTime();
+    })
+    .map((tag) => ({
+      id: tag.id,
+      name: tag.name,
+      color: tag.color,
+      sortOrder: tag.sortOrder,
+      createdAt: tag.createdAt.toISOString(),
+      updatedAt: tag.updatedAt.toISOString(),
+    }));
+}
+
 export function mapKnowledgeBaseListItem(item: KnowledgeBaseListRecord) {
   const validDocuments = item.documents.filter(
     (
@@ -109,6 +141,7 @@ export function mapKnowledgeBaseListItem(item: KnowledgeBaseListRecord) {
     similarityThreshold: item.similarityThreshold,
     topK: item.topK,
     status: item.status,
+    tags: mapKnowledgeBaseTags(item.tags),
     documentCount: validDocuments.length,
     chunkCount: validDocuments.reduce(
       (sum, relation) => sum + relation.document.chunks.length,
@@ -216,6 +249,7 @@ export function mapKnowledgeBaseTree(item: KnowledgeBaseTreeRecord) {
     similarityThreshold: item.similarityThreshold,
     topK: item.topK,
     status: item.status,
+    tags: mapKnowledgeBaseTags(item.tags),
     createdAt: item.createdAt.toISOString(),
     updatedAt: item.updatedAt.toISOString(),
     documents: validDocuments.map((relation) => ({

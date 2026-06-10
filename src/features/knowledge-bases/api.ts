@@ -1,3 +1,6 @@
+import type { RagRetrieveResponse } from "@/features/rag/types";
+import type { RagDebugRequest } from "@/features/knowledge-bases/types";
+
 // 兼容直接返回数据和统一响应格式 { success, data } 的接口响应。
 async function readApiData<T>(response: Response): Promise<T> {
   const payload = await response.json();
@@ -262,4 +265,30 @@ export async function unbindKnowledgeBaseDocuments(
   }
 
   return readApiData<unknown>(response);
+}
+
+export async function debugKnowledgeBase(
+  knowledgeBaseId: string,
+  payload: RagDebugRequest
+) {
+  const response = await fetch("/api/rag/retrieve", {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      query: payload.query,
+      mode: payload.mode,
+      scope: {
+        knowledgeBaseIds: [knowledgeBaseId],
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to debug knowledge base: ${response.status}`);
+  }
+
+  return readApiData<RagRetrieveResponse>(response);
 }

@@ -20,6 +20,7 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const parsed = tagListQuerySchema.safeParse({
       keyword: searchParams.get("keyword") ?? undefined,
+      scope: searchParams.get("scope") ?? undefined,
     });
 
     if (!parsed.success) {

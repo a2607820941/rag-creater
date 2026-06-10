@@ -145,6 +145,8 @@ export const updateDocumentSourceSchema = documentBaseObjectSchema
     }
   );
 
+const tagIdsSchema = z.array(z.string().min(1)).max(10).optional();
+
 export const createKnowledgeBaseSchema = z.object({
   name: z.string().trim().min(1).max(50),
   description: z.string().trim().max(500).optional(),
@@ -152,6 +154,7 @@ export const createKnowledgeBaseSchema = z.object({
   similarityThreshold: z.number().min(0).max(1).optional().default(0.7),
   topK: z.number().int().min(1).max(20).optional().default(5),
   status: statusSchema.optional().default("active"),
+  tagIds: tagIdsSchema,
   documentIds: z.array(z.string().min(1)).optional(),
   documents: z.array(createDocumentSourceSchema).optional(),
 });
@@ -164,6 +167,7 @@ export const updateKnowledgeBaseSchema = z
     similarityThreshold: z.number().min(0).max(1).optional(),
     topK: z.number().int().min(1).max(20).optional(),
     status: statusSchema.optional(),
+    tagIds: tagIdsSchema,
   })
   .refine((value) => Object.keys(value).length > 0, {
     message: "Provide at least one field to update",

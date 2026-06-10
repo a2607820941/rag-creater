@@ -62,6 +62,16 @@ export async function listTags(
     where.name = { contains: query.keyword };
   }
 
+  if (query.scope === "rag") {
+    await prisma.knowledgeTag.deleteMany({
+      where: {
+        knowledgeBases: { none: {} },
+      },
+    });
+
+    where.knowledgeBases = { some: {} };
+  }
+
   const tags = await prisma.knowledgeTag.findMany({
     where,
     orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }],

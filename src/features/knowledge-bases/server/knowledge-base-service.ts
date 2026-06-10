@@ -20,6 +20,15 @@ export async function getKnowledgeBaseListService(params: {
           OR: [
             { name: { contains: params.keyword } },
             { description: { contains: params.keyword } },
+            {
+              tags: {
+                some: {
+                  tag: {
+                    name: { contains: params.keyword },
+                  },
+                },
+              },
+            },
           ],
         }
       : {}),
@@ -32,6 +41,14 @@ export async function getKnowledgeBaseListService(params: {
     where,
     orderBy: { updatedAt: "desc" },
     include: {
+      tags: {
+        include: {
+          tag: true,
+        },
+        orderBy: {
+          createdAt: "asc",
+        },
+      },
       documents: {
         include: {
           document: {
@@ -54,6 +71,14 @@ export async function getKnowledgeBaseTreeService(id: string) {
   const item = await prisma.knowledgeBase.findUnique({
     where: { id },
     include: {
+      tags: {
+        include: {
+          tag: true,
+        },
+        orderBy: {
+          createdAt: "asc",
+        },
+      },
       documents: {
         orderBy: { sortOrder: "asc" },
         include: {
@@ -109,6 +134,47 @@ async function assertDocumentIdsExist(
   }
 
   return uniqueDocumentIds;
+}
+
+async function assertTagIdsExist(
+  tx: Prisma.TransactionClient,
+  tagIds: string[] | undefined
+) {
+  const uniqueTagIds = [...new Set(tagIds ?? [])];
+
+  if (uniqueTagIds.length === 0) return uniqueTagIds;
+
+  const tags = await tx.knowledgeTag.findMany({
+    where: { id: { in: uniqueTagIds } },
+    select: { id: true },
+  });
+
+  if (tags.length !== uniqueTagIds.length) {
+    const existingIds = new Set(tags.map((tag) => tag.id));
+    const missingIds = uniqueTagIds.filter((id) => !existingIds.has(id));
+
+    throw badRequest("some tags do not exist", {
+      tagIds: missingIds,
+    });
+  }
+
+  return uniqueTagIds;
+}
+
+async function deleteUnusedKnowledgeBaseTags(
+  tx: Prisma.TransactionClient,
+  tagIds: string[]
+) {
+  const uniqueTagIds = [...new Set(tagIds)];
+
+  if (uniqueTagIds.length === 0) return;
+
+  await tx.knowledgeTag.deleteMany({
+    where: {
+      id: { in: uniqueTagIds },
+      knowledgeBases: { none: {} },
+    },
+  });
 }
 
 async function assertDocumentsCanBeKnowledgeSource(
@@ -197,6 +263,7 @@ export async function createKnowledgeBaseService(
         ...existingDocumentIds,
         ...createdDocuments.map((document) => document.id),
       ];
+      const tagIds = await assertTagIdsExist(tx, input.tagIds);
 
       const item = await tx.knowledgeBase.create({
         data: {
@@ -206,6 +273,14 @@ export async function createKnowledgeBaseService(
           similarityThreshold: input.similarityThreshold,
           topK: input.topK,
           status: input.status,
+          tags:
+            tagIds.length > 0
+              ? {
+                  create: tagIds.map((tagId) => ({
+                    tagId,
+                  })),
+                }
+              : undefined,
           documents:
             documentIds.length > 0
               ? {
@@ -217,6 +292,14 @@ export async function createKnowledgeBaseService(
               : undefined,
         },
         include: {
+          tags: {
+            include: {
+              tag: true,
+            },
+            orderBy: {
+              createdAt: "asc",
+            },
+          },
           documents: {
             orderBy: { sortOrder: "asc" },
             include: {
@@ -290,37 +373,86 @@ export async function updateKnowledgeBaseService(
   input: UpdateKnowledgeBaseInput
 ) {
   try {
-    const item = await prisma.knowledgeBase.update({
-      where: { id },
-      data: {
-        name: input.name,
-        description: input.description,
-        icon: input.icon,
-        similarityThreshold: input.similarityThreshold,
-        topK: input.topK,
-        status: input.status,
-      },
-      include: {
-        documents: {
-          orderBy: { sortOrder: "asc" },
-          include: {
-            document: {
-              include: {
-                chunks: {
-                  where: {
-                    OR: [
-                      { chunkType: "text" },
-                      { chunkType: "knowledge", knowledgeBaseId: id, reviewStatus: "confirmed" },
-                      { chunkType: "knowledge", reviewStatus: "pending" },
-                    ],
+    const item = await prisma.$transaction(async (tx) => {
+      const tagIds =
+        input.tagIds === undefined
+          ? undefined
+          : await assertTagIdsExist(tx, input.tagIds);
+      const previousTagIds =
+        tagIds === undefined
+          ? []
+          : (
+              await tx.knowledgeBaseTag.findMany({
+                where: { knowledgeBaseId: id },
+                select: { tagId: true },
+              })
+            ).map((relation) => relation.tagId);
+
+      await tx.knowledgeBase.update({
+        where: { id },
+        data: {
+          name: input.name,
+          description: input.description,
+          icon: input.icon,
+          similarityThreshold: input.similarityThreshold,
+          topK: input.topK,
+          status: input.status,
+        },
+      });
+
+      if (tagIds !== undefined) {
+        await tx.knowledgeBaseTag.deleteMany({
+          where: { knowledgeBaseId: id },
+        });
+
+        if (tagIds.length > 0) {
+          await tx.knowledgeBaseTag.createMany({
+            data: tagIds.map((tagId) => ({
+              knowledgeBaseId: id,
+              tagId,
+            })),
+          });
+        }
+
+        await deleteUnusedKnowledgeBaseTags(tx, previousTagIds);
+      }
+
+      return tx.knowledgeBase.findUniqueOrThrow({
+        where: { id },
+        include: {
+          tags: {
+            include: {
+              tag: true,
+            },
+            orderBy: {
+              createdAt: "asc",
+            },
+          },
+          documents: {
+            orderBy: { sortOrder: "asc" },
+            include: {
+              document: {
+                include: {
+                  chunks: {
+                    where: {
+                      OR: [
+                        { chunkType: "text" },
+                        {
+                          chunkType: "knowledge",
+                          knowledgeBaseId: id,
+                          reviewStatus: "confirmed",
+                        },
+                        { chunkType: "knowledge", reviewStatus: "pending" },
+                      ],
+                    },
+                    orderBy: { chunkIndex: "asc" },
                   },
-                  orderBy: { chunkIndex: "asc" },
                 },
               },
             },
           },
         },
-      },
+      });
     });
 
     return mapKnowledgeBaseTree(item);
@@ -345,7 +477,18 @@ export async function updateKnowledgeBaseService(
 
 export async function deleteKnowledgeBaseService(id: string) {
   try {
-    await prisma.knowledgeBase.delete({ where: { id } });
+    await prisma.$transaction(async (tx) => {
+      const tagIds = (
+        await tx.knowledgeBaseTag.findMany({
+          where: { knowledgeBaseId: id },
+          select: { tagId: true },
+        })
+      ).map((relation) => relation.tagId);
+
+      await tx.knowledgeBase.delete({ where: { id } });
+      await deleteUnusedKnowledgeBaseTags(tx, tagIds);
+    });
+
     return { id };
   } catch (error) {
     if (

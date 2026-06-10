@@ -6,6 +6,7 @@ import {
   AlertCircle,
   ArrowLeft,
   BookOpen,
+  Bug,
   FolderOpen,
   Search as SearchIcon,
 } from "lucide-react";
@@ -43,6 +44,7 @@ import {
 
 import { DocumentAssignmentPanel } from "./document-assignment-panel";
 import { DocumentChunksDialog } from "./document-chunks-dialog";
+import { DebugPanel } from "./debug-panel";
 import { KnowledgeItemsPanel } from "./knowledge-items-panel";
 import {
   getDefaultKnowledgeBaseDetailFilter,
@@ -241,7 +243,9 @@ export function KnowledgeBaseDetailFeature() {
   const [saving, setSaving] = React.useState(false);
   const [removingItem, setRemovingItem] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
-  const [activeTab, setActiveTab] = React.useState<"knowledge-items" | "documents">("knowledge-items");
+  const [activeTab, setActiveTab] = React.useState<
+    "knowledge-items" | "documents" | "debug"
+  >("knowledge-items");
 
   const [searchKeyword, setSearchKeyword] = React.useState("");
   const [submittedSearchKeyword, setSubmittedSearchKeyword] =
@@ -881,6 +885,17 @@ export function KnowledgeBaseDetailFeature() {
               <FolderOpen className="size-4" />
               文档管理
             </button>
+            <button
+              onClick={() => setActiveTab("debug")}
+              className={`flex items-center gap-1.5 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                activeTab === "debug"
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <Bug className="size-4" />
+              Debug
+            </button>
           </div>
 
           {/* 知识条目面板 */}
@@ -971,6 +986,16 @@ export function KnowledgeBaseDetailFeature() {
                 onOpenChange={setChunkDialogOpen}
               />
             </>
+          )}
+
+          {activeTab === "debug" && (
+            <DebugPanel
+              knowledgeBaseId={knowledgeBaseId}
+              knowledgeBaseName={detail.name}
+              initialTopK={detail.topK}
+              initialSimilarityThreshold={detail.similarityThreshold}
+              onConfigSaved={loadData}
+            />
           )}
         </>
       ) : null}
