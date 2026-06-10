@@ -2,6 +2,7 @@ import type {
   ChatAttachmentDTO,
   ChatKnowledgeFile,
   ChatMessageDTO,
+  ChatStreamStatus,
   ChatSkillDraftSaved,
 } from "@/features/chat/chat.types";
 import type { ChatMode } from "@/features/chat/chat.validation";
@@ -19,6 +20,9 @@ export type AgentItem = {
 export type UiMessage = Omit<ChatMessageDTO, "id" | "createdAt"> & {
   id: string;
   pending?: boolean;
+  status?: "loading" | "streaming" | "done";
+  phase?: ChatStreamStatus;
+  loadingText?: string;
   knowledgeFiles?: ChatKnowledgeFile[];
   attachments?: ChatAttachmentDTO[];
 };

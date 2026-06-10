@@ -1,0 +1,114 @@
+{
+  "schemaVersion": "1.0",
+  "packageType": "enterprise-rag-skill",
+  "id": "cmq6nxf8o0035aovgri2txxaz",
+  "name": "简历评估与匹配分析",
+  "slug": "resume-evaluation-and-matching",
+  "version": "0.1.0",
+  "description": "根据用户提供的简历文本和岗位JD，评估候选人与岗位的匹配度，分析亮点与不足，并给出建议 Use for case_triage tasks in the hr domain for manager users, with platform RAG grounding and citations.",
+  "compatibleAgents": [
+    "claude-code",
+    "codex"
+  ],
+  "taskScenario": {
+    "domain": "hr",
+    "intent": "case_triage",
+    "audience": "manager",
+    "description": "管理者提供候选人简历文本和岗位JD，Skill基于知识库中的评估方法论，对简历进行综合分析，输出匹配度评分、亮点、不足和建议。适用于招聘筛选、简历初评场景。",
+    "triggerExamples": [
+      "帮我筛选符合 Java 开发岗位的简历",
+      "这份简历有哪些亮点和不足？",
+      "根据岗位 JD 评估候选人的匹配度"
+    ],
+    "nonGoals": [
+      "不处理非简历类文档的分析",
+      "不生成简历内容或修改简历",
+      "不进行面试安排或招聘流程管理",
+      "不处理薪资谈判或offer相关事宜"
+    ],
+    "outputStyle": "answer_with_citations"
+  },
+  "runtime": {
+    "type": "http",
+    "mode": "platform_rag",
+    "endpoint": "http://localhost:3000/api/public/skills/resume-evaluation-and-matching/run",
+    "method": "POST",
+    "auth": {
+      "type": "bearer"
+    },
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "resumeText": {
+          "type": "string",
+          "description": "候选人的简历文本内容"
+        },
+        "jobDescription": {
+          "type": "string",
+          "description": "岗位JD（职位描述），包含岗位要求、职责、技能要求等"
+        }
+      },
+      "required": [
+        "resumeText",
+        "jobDescription"
+      ]
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "candidateName": {
+          "type": "string",
+          "description": "候选人姓名"
+        },
+        "matchScore": {
+          "type": "number",
+          "description": "匹配度评分，0-100分",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "highlights": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "简历亮点列表"
+        },
+        "weaknesses": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "简历不足/待改进点列表"
+        },
+        "recommendation": {
+          "type": "string",
+          "description": "综合建议，如是否推荐面试、需要关注的风险点等"
+        }
+      },
+      "required": [
+        "candidateName",
+        "matchScore",
+        "highlights",
+        "weaknesses",
+        "recommendation"
+      ]
+    },
+    "skillId": "cmq6nxf8o0035aovgri2txxaz"
+  },
+  "resources": {
+    "entrypoint": "SKILL.md",
+    "installGuide": "INSTALL.md",
+    "references": [
+      "references/api.md",
+      "references/knowledge-scope.md",
+      "references/task-scenario.md",
+      "references/examples.md",
+      "references/runtime.md"
+    ],
+    "scripts": [
+      "scripts/run-skill.mjs",
+      "scripts/set-runtime-key.mjs",
+      "scripts/install-skill.mjs"
+    ]
+  }
+}

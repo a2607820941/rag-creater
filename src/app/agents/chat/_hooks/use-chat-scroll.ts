@@ -1,18 +1,22 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 
 type UseChatScrollOptions = {
   bottomThresholdPx: number;
   itemCount: number;
   scrollToLatest: () => void;
+  scrollContainerRef?: RefObject<HTMLElement | null>;
 };
 
 export function useChatScroll({
   bottomThresholdPx,
   itemCount,
   scrollToLatest,
+  scrollContainerRef: externalScrollContainerRef,
 }: UseChatScrollOptions) {
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
-  const scrollContainerRef = useRef<HTMLElement>(null);
+  const internalScrollContainerRef = useRef<HTMLElement>(null);
+  const scrollContainerRef =
+    externalScrollContainerRef ?? internalScrollContainerRef;
   const shouldAutoScrollRef = useRef(true);
   const scrollToBottomFrameRef = useRef<number | null>(null);
   const isNearBottomRef = useRef(true);
@@ -53,7 +57,7 @@ export function useChatScroll({
       container.scrollTop = container.scrollHeight;
       syncScrollFollowState(true);
     });
-  }, [itemCount, scrollToLatest, syncScrollFollowState]);
+  }, [itemCount, scrollContainerRef, scrollToLatest, syncScrollFollowState]);
 
   const jumpToBottom = useCallback(() => {
     requestScrollToBottom();
@@ -64,7 +68,7 @@ export function useChatScroll({
     if (!container) return;
 
     syncScrollFollowState(isNearBottom(container));
-  }, [isNearBottom, syncScrollFollowState]);
+  }, [isNearBottom, scrollContainerRef, syncScrollFollowState]);
 
   const resetScrollTracking = useCallback(() => {
     shouldAutoScrollRef.current = true;
