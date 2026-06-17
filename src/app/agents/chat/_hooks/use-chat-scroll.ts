@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type RefObject } from "react"
 
 type UseChatScrollOptions = {
   bottomThresholdPx: number;
+  followKey?: string | number;
   itemCount: number;
   scrollToLatest: () => void;
   scrollContainerRef?: RefObject<HTMLElement | null>;
@@ -9,6 +10,7 @@ type UseChatScrollOptions = {
 
 export function useChatScroll({
   bottomThresholdPx,
+  followKey,
   itemCount,
   scrollToLatest,
   scrollContainerRef: externalScrollContainerRef,
@@ -91,6 +93,12 @@ export function useChatScroll({
 
     setShowScrollToBottom(true);
   }, [itemCount, requestScrollToBottom, resetScrollTracking]);
+
+  useEffect(() => {
+    if (itemCount === 0 || !shouldAutoScrollRef.current) return;
+
+    requestScrollToBottom();
+  }, [followKey, itemCount, requestScrollToBottom]);
 
   useEffect(() => {
     return () => {

@@ -3,7 +3,10 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import type { ChatConversationDTO } from "@/features/chat/chat.types";
+import type {
+  ChatConversationDTO,
+  ChatMessageDTO,
+} from "@/features/chat/chat.types";
 import { useAppStore } from "@/store";
 
 import { useChatAttachments } from "./use-chat-attachments";
@@ -12,6 +15,7 @@ import {
   createConversationRequest,
   deleteConversationRequest,
   fetchActiveAgents,
+  fetchConversation,
   fetchConversationMessages,
   updateConversationModelRequest,
 } from "../_lib/chat-page-api";
@@ -48,6 +52,7 @@ export function useChatSessionController({
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const messageLoadRequestRef = useRef(0);
+  const messageCacheRef = useRef(new Map<string, ChatMessageDTO[]>());
   const conversations = useAppStore((state) => state.chatConversations);
   const loadConversations = useAppStore((state) => state.loadChatConversations);
   const upsertConversation = useAppStore(
@@ -157,13 +162,21 @@ export function useChatSessionController({
       abortPendingUploads();
       clearAttachments();
       setConversationId(conversation.id);
-      setIsLoadingMessages(true);
       setInput("");
       setError(null);
       setConversationMenu(null);
       setAgentId(conversation.agentId ?? "");
       setChatMode(toClientChatMode(conversation.mode, conversation.agentId));
       onResetScrollTracking();
+
+      const cachedMessages = messageCacheRef.current.get(conversation.id);
+      if (cachedMessages) {
+        replaceMessages(cachedMessages);
+        setIsLoadingMessages(false);
+        return;
+      }
+
+      setIsLoadingMessages(true);
 
       try {
         const json = await fetchConversationMessages(conversation.id);
@@ -172,6 +185,7 @@ export function useChatSessionController({
         }
 
         if (messageLoadRequestRef.current !== requestId) return;
+        messageCacheRef.current.set(conversation.id, json.data);
         replaceMessages(json.data);
       } catch (err) {
         if (messageLoadRequestRef.current !== requestId) return;
@@ -271,20 +285,35 @@ export function useChatSessionController({
       };
     }
 
-    loadConversations({ force: true })
-      .then((items) => {
-        const matchedConversation = items.find(
-          (item) => item.id === queryConversationId
-        );
-        if (matchedConversation) {
-          void loadConversation(matchedConversation);
+    let cancelled = false;
+
+    void loadConversations({ force: true }).catch((err) => {
+      if (cancelled) return;
+      setError(
+        err instanceof Error ? err.message : "Failed to load conversations"
+      );
+    });
+
+    fetchConversation(queryConversationId)
+      .then((json) => {
+        if (cancelled) return;
+        if (!json?.success || !json.data) {
+          throw new Error("Conversation not found");
         }
+
+        upsertConversation(json.data);
+        void loadConversation(json.data);
       })
       .catch((err) => {
+        if (cancelled) return;
         setError(
           err instanceof Error ? err.message : "Failed to load conversations"
         );
       });
+
+    return () => {
+      cancelled = true;
+    };
   }, [
     conversationId,
     conversations,
@@ -292,6 +321,7 @@ export function useChatSessionController({
     loadConversations,
     queryConversationId,
     resetConversationDraft,
+    upsertConversation,
   ]);
 
   const submitMessage = useCallback(async () => {
@@ -306,8 +336,11 @@ export function useChatSessionController({
     }
 
     setInput("");
+    if (conversationId) {
+      messageCacheRef.current.delete(conversationId);
+    }
     await sendMessage(nextInput);
-  }, [attachments, input, loading, sendMessage]);
+  }, [attachments, conversationId, input, loading, sendMessage]);
 
   const startNewConversation = useCallback(async () => {
     if (loading) return;
@@ -348,11 +381,11 @@ export function useChatSessionController({
   const openConversation = useCallback(
     (conversation: ChatConversationDTO) => {
       if (loading) return;
+      if (conversation.id === conversationId) return;
 
-      void loadConversation(conversation);
       router.push(`/agents/chat?conversationId=${conversation.id}`);
     },
-    [loadConversation, loading, router]
+    [conversationId, loading, router]
   );
 
   const handleModelChange = useCallback(
@@ -414,6 +447,7 @@ export function useChatSessionController({
         }
 
         removeConversation(id);
+        messageCacheRef.current.delete(id);
         if (conversationId === id) {
           messageLoadRequestRef.current += 1;
           clearConversationRuntime();

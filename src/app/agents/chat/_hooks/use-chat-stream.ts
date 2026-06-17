@@ -4,8 +4,9 @@ import { startTransition, useCallback, useEffect, useRef, useState } from "react
 
 import type {
   ChatMessageDTO,
-  ChatStreamStatus,
   ChatSkillDraftSaved,
+  ChatStreamStatus,
+  ChatTraceStep,
 } from "@/features/chat/chat.types";
 
 import { useTypingQueue } from "./use-typing-queue";
@@ -22,10 +23,8 @@ import type {
 } from "../_lib/chat-types";
 import { isSkillPublishCommand } from "../_lib/chat-page-utils";
 
-const TYPING_DELAY_MIN_MS = 20;
-const TYPING_DELAY_MAX_MS = 40;
-const TYPING_CHUNK_CHAR_MIN = 1;
-const TYPING_CHUNK_CHAR_MAX = 3;
+const TYPING_CHUNK_CHAR_MIN = 8;
+const TYPING_CHUNK_CHAR_MAX = 24;
 
 type UseChatStreamOptions = {
   agentId: string;
@@ -91,11 +90,10 @@ export function useChatStream({
   } = useTypingQueue({
     chunkCharMax: TYPING_CHUNK_CHAR_MAX,
     chunkCharMin: TYPING_CHUNK_CHAR_MIN,
-    delayMaxMs: TYPING_DELAY_MAX_MS,
-    delayMinMs: TYPING_DELAY_MIN_MS,
     onAppendText: appendAssistantText,
   });
 
+  //加载历史会话。
   const replaceMessages = useCallback((nextMessages: ChatMessageDTO[]) => {
     setMessages(
       nextMessages.map((message) => ({
@@ -274,7 +272,22 @@ export function useChatStream({
               )
             );
           },
-          trace: () => undefined,
+          trace: (traceStep) => {
+            const loadingText = getTraceLoadingText(traceStep);
+            if (!loadingText) return;
+
+            setMessages((prev) =>
+              prev.map((item) =>
+                item.id === assistantMessage.id && !item.content
+                  ? {
+                      ...item,
+                      status: "loading",
+                      loadingText,
+                    }
+                  : item
+              )
+            );
+          },
           knowledgeFiles: (knowledgeFiles) => {
             setMessages((prev) =>
               prev.map((item) =>
@@ -416,10 +429,37 @@ function getInitialAssistantPhase(chatMode: ChatMode): ChatStreamStatus {
 
 function getAssistantLoadingText(status: ChatStreamStatus) {
   if (status === "retrieving") return "\u6b63\u5728\u68c0\u7d22\u77e5\u8bc6\u5e93";
-  if (status === "organizing") return "\u6b63\u5728\u6574\u7406\u76f8\u5173\u5185\u5bb9";
+  if (status === "organizing") return "\u6b63\u5728\u6574\u7406\u4e0a\u4e0b\u6587";
   if (status === "reading-documents") return "\u6b63\u5728\u8bfb\u53d6\u77e5\u8bc6\u6587\u4ef6";
-  if (status === "generating") return "\u6b63\u5728\u601d\u8003\u4e2d";
+  if (status === "generating") return "\u6b63\u5728\u751f\u6210\u56de\u7b54";
   if (status === "failed") return "\u8bf7\u6c42\u5931\u8d25";
   if (status === "stopped") return "\u5df2\u505c\u6b62";
-  return "\u6b63\u5728\u601d\u8003\u4e2d";
+  return "\u6b63\u5728\u751f\u6210\u56de\u7b54";
+}
+
+function getTraceLoadingText(step: ChatTraceStep) {
+  if (step.status !== "running") return null;
+
+  const title = step.title.toLowerCase();
+
+  if (title.includes("installed skills")) {
+    return "\u6b63\u5728\u5339\u914d\u53ef\u7528 Skill";
+  }
+  if (title.includes("skill agent")) {
+    return "\u6b63\u5728\u51c6\u5907 Skill Agent";
+  }
+  if (title.includes("knowledge agent")) {
+    return "\u6b63\u5728\u51c6\u5907\u77e5\u8bc6\u5e93\u95ee\u7b54";
+  }
+  if (title.includes("select target documents")) {
+    return "\u6b63\u5728\u9009\u62e9\u76f8\u5173\u6587\u6863";
+  }
+  if (title.includes("read selected documents")) {
+    return "\u6b63\u5728\u8bfb\u53d6\u76f8\u5173\u6587\u6863";
+  }
+  if (title.includes("generate")) {
+    return "\u6b63\u5728\u751f\u6210\u56de\u7b54";
+  }
+
+  return step.detail || step.title;
 }

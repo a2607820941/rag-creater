@@ -50,6 +50,15 @@ function AgentChatFeatureContent() {
       align: "end",
     });
   }, [controller.messages.length, messageVirtualizer]);
+  const latestMessage = controller.messages[controller.messages.length - 1];
+  const scrollFollowKey = latestMessage
+    ? [
+        latestMessage.id,
+        latestMessage.content.length,
+        latestMessage.status,
+        latestMessage.pending ? "pending" : "done",
+      ].join(":")
+    : "";
 
   const {
     handleMessageScroll,
@@ -58,6 +67,7 @@ function AgentChatFeatureContent() {
     showScrollToBottom,
   } = useChatScroll({
     bottomThresholdPx: BOTTOM_SCROLL_THRESHOLD_PX,
+    followKey: scrollFollowKey,
     itemCount: controller.messages.length,
     scrollToLatest,
     scrollContainerRef,

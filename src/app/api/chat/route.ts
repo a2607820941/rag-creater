@@ -46,8 +46,7 @@ export async function POST(request: NextRequest) {
           conversationId: conversation.id,
         });
         emit("status", {
-          status:
-            parsed.data.chatMode === "rag-openai" ? "retrieving" : "organizing",
+          status: getInitialChatStatus(parsed.data.chatMode),
         });
 
         await orchestrateChat({
@@ -89,4 +88,16 @@ export async function POST(request: NextRequest) {
       Connection: "keep-alive",
     },
   });
+}
+
+function getInitialChatStatus(chatMode: string) {
+  if (
+    chatMode === "agent" ||
+    chatMode === "knowledge-agent" ||
+    chatMode === "rag-openai"
+  ) {
+    return "retrieving";
+  }
+
+  return "organizing";
 }

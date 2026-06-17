@@ -1,8 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useState } from "react";
-import MDEditor from "@uiw/react-md-editor";
+import { memo, useState } from "react";
 import {
   Bot,
   Check,
@@ -27,21 +26,51 @@ import type {
   ChatAttachmentDTO,
   ChatCitation,
   ChatKnowledgeFile,
+  ChatStreamStatus,
 } from "@/features/chat/chat.types";
 
+import { ChatMarkdown } from "./chat-markdown";
 import type { UiMessage } from "../_lib/chat-types";
 
-export function MessageBubble({ message }: { message: UiMessage }) {
+function MessageBubbleComponent({ message }: { message: UiMessage }) {
   const isUser = message.role === "user";
   const isAssistantLoading =
-    !isUser && message.status === "loading" && !message.content;
+    !isUser &&
+    message.status === "loading" &&
+    !message.content &&
+    shouldShowAssistantLoading(message.phase);
   const [copied, setCopied] = useState(false);
+  const [citationsExpanded, setCitationsExpanded] = useState(false);
+  const [activeCitationRefId, setActiveCitationRefId] = useState<string | null>(
+    null
+  );
+  const [selectedCitation, setSelectedCitation] = useState<ChatCitation | null>(
+    null
+  );
+
+  if (!isUser && !message.content && !isAssistantLoading) {
+    return null;
+  }
 
   async function copyAnswer() {
     if (!message.content) return;
     await navigator.clipboard.writeText(message.content);
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1600);
+  }
+
+  function openCitationReference(refId: string) {
+    const matchedCitation = message.citations.find(
+      (citation) =>
+        normalizeCitationRefId(citation.refId) === normalizeCitationRefId(refId)
+    );
+
+    setActiveCitationRefId(refId);
+
+    if (!matchedCitation) return;
+
+    setCitationsExpanded(true);
+    setSelectedCitation(matchedCitation);
   }
 
   return (
@@ -71,10 +100,17 @@ export function MessageBubble({ message }: { message: UiMessage }) {
           <>
             {isAssistantLoading ? (
               <AssistantLoadingMessage
-                text={message.loadingText || "\u6b63\u5728\u68c0\u7d22\u77e5\u8bc6\u5e93"}
+                text={
+                  message.loadingText ||
+                  "\u6b63\u5728\u68c0\u7d22\u77e5\u8bc6\u5e93"
+                }
               />
             ) : (
-              <AssistantMarkdown content={message.content} />
+              <ChatMarkdown
+                content={message.content}
+                onReferenceClick={openCitationReference}
+                streaming={message.status === "streaming" || message.pending}
+              />
             )}
           </>
         )}
@@ -82,7 +118,14 @@ export function MessageBubble({ message }: { message: UiMessage }) {
           <KnowledgeFilesNotice files={message.knowledgeFiles} />
         )}
         {!isUser && message.citations.length > 0 && (
-          <CitationSources citations={message.citations} />
+          <CitationSources
+            activeRefId={activeCitationRefId}
+            citations={message.citations}
+            expanded={citationsExpanded}
+            onExpandedChange={setCitationsExpanded}
+            onSelectedCitationChange={setSelectedCitation}
+            selectedCitation={selectedCitation}
+          />
         )}
         {!isUser && !message.pending && message.content && (
           <div className="mt-3 flex items-center gap-1">
@@ -109,6 +152,38 @@ export function MessageBubble({ message }: { message: UiMessage }) {
         </div>
       )}
     </div>
+  );
+}
+
+export const MessageBubble = memo(MessageBubbleComponent, areMessagesEqual);
+
+function areMessagesEqual(
+  previous: { message: UiMessage },
+  next: { message: UiMessage }
+) {
+  const previousMessage = previous.message;
+  const nextMessage = next.message;
+
+  return (
+    previousMessage.id === nextMessage.id &&
+    previousMessage.role === nextMessage.role &&
+    previousMessage.content === nextMessage.content &&
+    previousMessage.pending === nextMessage.pending &&
+    previousMessage.status === nextMessage.status &&
+    previousMessage.phase === nextMessage.phase &&
+    previousMessage.loadingText === nextMessage.loadingText &&
+    previousMessage.citations === nextMessage.citations &&
+    previousMessage.knowledgeFiles === nextMessage.knowledgeFiles &&
+    previousMessage.attachments === nextMessage.attachments
+  );
+}
+
+function shouldShowAssistantLoading(phase?: ChatStreamStatus) {
+  return (
+    phase === "retrieving" ||
+    phase === "reading-documents" ||
+    phase === "failed" ||
+    phase === "stopped"
   );
 }
 
@@ -187,50 +262,6 @@ function UserAttachments({
   );
 }
 
-function AssistantMarkdown({ content }: { content: string }) {
-  if (!content) return null;
-
-  return (
-    <div
-      data-color-mode="light"
-      className="chat-markdown min-w-0 break-words [&_.wmde-markdown]:bg-transparent! [&_.wmde-markdown]:text-inherit! [&_.wmde-markdown]:text-sm! [&_.wmde-markdown]:leading-7!"
-    >
-      <MDEditor.Markdown source={formatInlineReferences(content)} />
-    </div>
-  );
-}
-
-function formatInlineReferences(content: string) {
-  return normalizeInlineReferenceClusters(content).replace(
-    /\[(ref[_-]?\d+)\]/gi,
-    (_, ref: string) => `<sup class="chat-ref">[${ref}]</sup>`
-  );
-}
-
-function normalizeInlineReferenceClusters(content: string) {
-  const refPattern = String.raw`\[ref[_-]?\d+\]`;
-  const connectorPattern = String.raw`(?:和|与|及|、|,|，|and|&)`;
-  const groupPattern = new RegExp(
-    String.raw`\s*[（(]\s*(${refPattern}(?:\s*${connectorPattern}\s*${refPattern})+)\s*[）)]`,
-    "gi"
-  );
-  const connectorGroupPattern = new RegExp(
-    String.raw`(${refPattern})\s*${connectorPattern}\s*(${refPattern})`,
-    "gi"
-  );
-
-  let normalized = content.replace(groupPattern, (_, refs: string) =>
-    refs.replace(new RegExp(String.raw`\s*${connectorPattern}\s*`, "gi"), "")
-  );
-
-  while (connectorGroupPattern.test(normalized)) {
-    normalized = normalized.replace(connectorGroupPattern, "$1$2");
-    connectorGroupPattern.lastIndex = 0;
-  }
-
-  return normalized;
-}
-
 function KnowledgeFilesNotice({ files }: { files: ChatKnowledgeFile[] }) {
   return (
     <div className="mt-3 rounded-md border border-emerald-100 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
@@ -249,11 +280,21 @@ function KnowledgeFilesNotice({ files }: { files: ChatKnowledgeFile[] }) {
   );
 }
 
-function CitationSources({ citations }: { citations: ChatCitation[] }) {
-  const [expanded, setExpanded] = useState(false);
-  const [selectedCitation, setSelectedCitation] = useState<ChatCitation | null>(
-    null
-  );
+function CitationSources({
+  activeRefId,
+  citations,
+  expanded,
+  onExpandedChange,
+  onSelectedCitationChange,
+  selectedCitation,
+}: {
+  activeRefId: string | null;
+  citations: ChatCitation[];
+  expanded: boolean;
+  onExpandedChange: (expanded: boolean) => void;
+  onSelectedCitationChange: (citation: ChatCitation | null) => void;
+  selectedCitation: ChatCitation | null;
+}) {
   const visibleCitations = expanded ? citations : [];
 
   return (
@@ -261,7 +302,7 @@ function CitationSources({ citations }: { citations: ChatCitation[] }) {
       <div className="flex items-center justify-between gap-3">
         <button
           type="button"
-          onClick={() => setExpanded((value) => !value)}
+          onClick={() => onExpandedChange(!expanded)}
           className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-200 hover:text-slate-900"
         >
           References {citations.length}
@@ -281,8 +322,14 @@ function CitationSources({ citations }: { citations: ChatCitation[] }) {
         <button
           type="button"
           key={`${citation.refId}-${citation.chunkId}`}
-          onClick={() => setSelectedCitation(citation)}
-          className="rounded-md bg-emerald-50/70 p-3 text-left text-xs text-slate-600 transition-colors hover:bg-emerald-50"
+          onClick={() => onSelectedCitationChange(citation)}
+          className={`rounded-md p-3 text-left text-xs text-slate-600 transition-colors hover:bg-emerald-50 ${
+            activeRefId &&
+            normalizeCitationRefId(citation.refId) ===
+              normalizeCitationRefId(activeRefId)
+              ? "bg-emerald-100 ring-1 ring-emerald-200"
+              : "bg-emerald-50/70"
+          }`}
         >
           <div className="flex items-center justify-between gap-2">
             <span className="min-w-0 truncate font-medium text-slate-900">
@@ -301,11 +348,15 @@ function CitationSources({ citations }: { citations: ChatCitation[] }) {
       <CitationDetailDialog
         citation={selectedCitation}
         onOpenChange={(open) => {
-          if (!open) setSelectedCitation(null);
+          if (!open) onSelectedCitationChange(null);
         }}
       />
     </div>
   );
+}
+
+function normalizeCitationRefId(refId: string) {
+  return refId.replace(/^\[|\]$/g, "").replace("-", "_").toLowerCase();
 }
 
 function CitationDetailDialog({

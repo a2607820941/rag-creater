@@ -9,31 +9,41 @@ type UseTypingQueueOptions = {
 };
 
 export function useTypingQueue({
-  chunkCharMax = 3,
-  chunkCharMin = 1,
-  delayMaxMs = 50,
-  delayMinMs = 25,
+  chunkCharMax = 24,
+  chunkCharMin = 8,
   onAppendText,
 }: UseTypingQueueOptions) {
   const typingQueueRef = useRef<string[]>([]);
-  const typingTimeoutRef = useRef<number | null>(null);
+  const typingFrameRef = useRef<number | null>(null);
   const typingMessageIdRef = useRef<string | null>(null);
+  const typingPendingCharCountRef = useRef(0);
   const typingSessionIdRef = useRef(0);
   const typingStreamDoneRef = useRef(false);
   const typingDrainResolverRef = useRef<(() => void) | null>(null);
 
-  const clearTypingTimer = useCallback(() => {
-    if (typingTimeoutRef.current !== null) {
-      window.clearTimeout(typingTimeoutRef.current);
-      typingTimeoutRef.current = null;
+  const cancelTypingFrame = useCallback(() => {
+    if (typingFrameRef.current !== null) {
+      window.cancelAnimationFrame(typingFrameRef.current);
+      typingFrameRef.current = null;
     }
   }, []);
 
-  const getTypingDelay = useCallback(() => {
-    return (
-      delayMinMs + Math.floor(Math.random() * (delayMaxMs - delayMinMs + 1))
-    );
-  }, [delayMaxMs, delayMinMs]);
+  const getBaseChunkSize = useCallback(() => {
+    const minChars = Math.max(1, Math.min(chunkCharMin, chunkCharMax));
+    const maxChars = Math.max(minChars, chunkCharMax);
+    return minChars + Math.floor(Math.random() * (maxChars - minChars + 1));
+  }, [chunkCharMax, chunkCharMin]);
+
+  const getTypingBudget = useCallback(() => {
+    const pendingChars = typingPendingCharCountRef.current;
+    const baseChunkSize = getBaseChunkSize();
+
+    if (pendingChars > 2000) return Math.min(pendingChars, baseChunkSize * 8);
+    if (pendingChars > 800) return Math.min(pendingChars, baseChunkSize * 4);
+    if (pendingChars > 240) return Math.min(pendingChars, baseChunkSize * 2);
+
+    return Math.min(pendingChars, baseChunkSize);
+  }, [getBaseChunkSize]);
 
   const takeNextTypingSlice = useCallback((maxChars: number) => {
     let remaining = maxChars;
@@ -49,6 +59,10 @@ export function useTypingQueue({
       const slice = currentChunk.slice(0, remaining);
       nextText += slice;
       remaining -= slice.length;
+      typingPendingCharCountRef.current = Math.max(
+        0,
+        typingPendingCharCountRef.current - slice.length
+      );
 
       if (slice.length >= currentChunk.length) {
         typingQueueRef.current.shift();
@@ -64,7 +78,7 @@ export function useTypingQueue({
     if (
       sessionId !== typingSessionIdRef.current ||
       !typingStreamDoneRef.current ||
-      typingQueueRef.current.length > 0
+      typingPendingCharCountRef.current > 0
     ) {
       return;
     }
@@ -73,47 +87,44 @@ export function useTypingQueue({
     typingDrainResolverRef.current = null;
   }, []);
 
-  const scheduleTypingTickRef = useRef<(sessionId: number) => void>(() => undefined);
+  const scheduleTypingTickRef = useRef<(sessionId: number) => void>(
+    () => undefined
+  );
 
   const scheduleTypingTick = useCallback(
     (sessionId: number) => {
-      if (typingTimeoutRef.current !== null) return;
+      if (typingFrameRef.current !== null) return;
       if (sessionId !== typingSessionIdRef.current) return;
 
-      if (typingQueueRef.current.length === 0) {
+      if (typingPendingCharCountRef.current === 0) {
         resolveTypingDrainIfReady(sessionId);
         return;
       }
 
-      typingTimeoutRef.current = window.setTimeout(() => {
-        typingTimeoutRef.current = null;
+      typingFrameRef.current = window.requestAnimationFrame(() => {
+        typingFrameRef.current = null;
 
         if (sessionId !== typingSessionIdRef.current) return;
 
         const messageId = typingMessageIdRef.current;
         if (!messageId) return;
 
-        const chunkSize =
-          chunkCharMin +
-          Math.floor(Math.random() * (chunkCharMax - chunkCharMin + 1));
-        const nextSlice = takeNextTypingSlice(chunkSize);
+        const nextSlice = takeNextTypingSlice(getTypingBudget());
 
         if (nextSlice) {
           onAppendText(messageId, nextSlice);
         }
 
-        if (typingQueueRef.current.length > 0) {
+        if (typingPendingCharCountRef.current > 0) {
           scheduleTypingTickRef.current(sessionId);
           return;
         }
 
         resolveTypingDrainIfReady(sessionId);
-      }, getTypingDelay());
+      });
     },
     [
-      chunkCharMax,
-      chunkCharMin,
-      getTypingDelay,
+      getTypingBudget,
       onAppendText,
       resolveTypingDrainIfReady,
       takeNextTypingSlice,
@@ -126,15 +137,16 @@ export function useTypingQueue({
 
   const beginTypingSession = useCallback(
     (messageId: string) => {
-      clearTypingTimer();
+      cancelTypingFrame();
       typingQueueRef.current = [];
       typingMessageIdRef.current = messageId;
+      typingPendingCharCountRef.current = 0;
       typingSessionIdRef.current += 1;
       typingStreamDoneRef.current = false;
       typingDrainResolverRef.current = null;
       return typingSessionIdRef.current;
     },
-    [clearTypingTimer]
+    [cancelTypingFrame]
   );
 
   const enqueueTypingChunk = useCallback(
@@ -142,6 +154,7 @@ export function useTypingQueue({
       if (!chunk || sessionId !== typingSessionIdRef.current) return;
 
       typingQueueRef.current.push(chunk);
+      typingPendingCharCountRef.current += chunk.length;
       scheduleTypingTick(sessionId);
     },
     [scheduleTypingTick]
@@ -152,7 +165,7 @@ export function useTypingQueue({
       if (sessionId !== typingSessionIdRef.current) return;
 
       typingStreamDoneRef.current = true;
-      if (typingQueueRef.current.length > 0) {
+      if (typingPendingCharCountRef.current > 0) {
         scheduleTypingTick(sessionId);
         return;
       }
@@ -165,7 +178,7 @@ export function useTypingQueue({
   const waitForTypingDrain = useCallback((sessionId: number) => {
     if (
       sessionId !== typingSessionIdRef.current ||
-      (typingStreamDoneRef.current && typingQueueRef.current.length === 0)
+      (typingStreamDoneRef.current && typingPendingCharCountRef.current === 0)
     ) {
       return Promise.resolve();
     }
@@ -176,14 +189,15 @@ export function useTypingQueue({
   }, []);
 
   const stopTypingSession = useCallback(() => {
-    clearTypingTimer();
+    cancelTypingFrame();
     typingQueueRef.current = [];
     typingMessageIdRef.current = null;
+    typingPendingCharCountRef.current = 0;
     typingStreamDoneRef.current = true;
     typingSessionIdRef.current += 1;
     typingDrainResolverRef.current?.();
     typingDrainResolverRef.current = null;
-  }, [clearTypingTimer]);
+  }, [cancelTypingFrame]);
 
   return {
     beginTypingSession,

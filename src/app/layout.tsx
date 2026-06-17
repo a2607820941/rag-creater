@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import "@uiw/react-md-editor/markdown-editor.css";
 import "@uiw/react-markdown-preview/markdown.css";
+import "highlight.js/styles/github.css";
 import { Noto_Sans } from "next/font/google";
 import { cn } from "@/lib/utils";
 

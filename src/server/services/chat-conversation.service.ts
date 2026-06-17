@@ -62,6 +62,32 @@ export async function listChatConversations(options?: {
   };
 }
 
+export async function getChatConversation(
+  conversationId: string
+): Promise<ChatConversationDTO | null> {
+  const conversation = await prisma.chatConversation.findUnique({
+    where: { id: conversationId },
+    include: {
+      _count: {
+        select: { messages: true },
+      },
+    },
+  });
+
+  if (!conversation || conversation.status !== "active") return null;
+
+  return {
+    id: conversation.id,
+    title: conversation.title,
+    mode: conversation.mode,
+    agentId: conversation.agentId,
+    status: conversation.status,
+    messageCount: conversation._count.messages,
+    createdAt: conversation.createdAt.toISOString(),
+    updatedAt: conversation.updatedAt.toISOString(),
+  };
+}
+
 export async function createEmptyChatConversation(input?: {
   mode?: string;
   agentId?: string;

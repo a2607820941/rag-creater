@@ -4,6 +4,7 @@ import { z } from "zod";
 import { conversationIdSchema } from "@/features/chat/chat.validation";
 import {
   deleteChatConversation,
+  getChatConversation,
   updateChatConversationModel,
 } from "@/server/services/chat-conversation.service";
 
@@ -11,6 +12,44 @@ const updateConversationSchema = z.object({
   mode: z.enum(["openai", "agent", "knowledge-agent", "skill-agent", "rag-openai"]),
   agentId: z.string().trim().min(1).nullable().optional(),
 });
+
+export async function GET(
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const parsedParams = conversationIdSchema.safeParse(await params);
+    if (!parsedParams.success) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: { code: "VALIDATION_ERROR", message: "Invalid conversation id" },
+        },
+        { status: 400 }
+      );
+    }
+
+    const conversation = await getChatConversation(parsedParams.data.id);
+    if (!conversation) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: { code: "NOT_FOUND", message: "Conversation not found" },
+        },
+        { status: 404 }
+      );
+    }
+
+    return NextResponse.json({ success: true, data: conversation });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Failed to get conversation";
+    return NextResponse.json(
+      { success: false, error: { code: "INTERNAL_ERROR", message } },
+      { status: 500 }
+    );
+  }
+}
 
 export async function PATCH(
   request: NextRequest,

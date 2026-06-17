@@ -16,6 +16,11 @@ export async function fetchConversationMessages(conversationId: string) {
   return parseJsonResponse<MessageListResponse>(response);
 }
 
+export async function fetchConversation(conversationId: string) {
+  const response = await fetch(`/api/conversations/${conversationId}`);
+  return parseJsonResponse<ConversationUpdateResponse>(response);
+}
+
 export async function fetchActiveAgents() {
   const response = await fetch("/api/agents?status=active&pageSize=100");
   return parseJsonResponse<AgentListResponse>(response);
