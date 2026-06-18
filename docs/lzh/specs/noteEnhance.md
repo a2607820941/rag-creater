@@ -253,7 +253,7 @@ POST /api/notes/[id]/enhance
       insertedText?: string;
       error?: string;
     }>;
-  };
+  }
 }
 ```
 
