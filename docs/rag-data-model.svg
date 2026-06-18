@@ -1,0 +1,120 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="760" viewBox="0 0 1280 760" role="img" aria-labelledby="title desc">
+  <title id="title">RAG knowledge base data model</title>
+  <desc id="desc">Simplified entity relationship diagram for KnowledgeBase, DocumentSource, DocumentChunk, KnowledgeBaseDocument, KnowledgeTag and KnowledgeBaseTag.</desc>
+  <defs>
+    <style>
+      .bg { fill: #f8fafc; }
+      .card { fill: #ffffff; stroke: #1f2937; stroke-width: 2.2; rx: 12; }
+      .header { fill: #eef2ff; stroke: #1f2937; stroke-width: 2.2; }
+      .title { font: 700 22px Arial, "Microsoft YaHei", sans-serif; fill: #111827; }
+      .field { font: 16px Arial, "Microsoft YaHei", sans-serif; fill: #374151; }
+      .label { font: 15px Arial, "Microsoft YaHei", sans-serif; fill: #475569; }
+      .section { font: 700 30px Arial, "Microsoft YaHei", sans-serif; fill: #111827; }
+      .note { font: 16px Arial, "Microsoft YaHei", sans-serif; fill: #64748b; }
+      .rel { stroke: #334155; stroke-width: 2.4; fill: none; marker-end: url(#arrow); }
+      .rel2 { stroke: #64748b; stroke-width: 2; fill: none; stroke-dasharray: 8 6; marker-end: url(#arrow2); }
+    </style>
+    <marker id="arrow" markerWidth="11" markerHeight="11" refX="9" refY="5.5" orient="auto">
+      <path d="M 0 0 L 10 5.5 L 0 11 z" fill="#334155" />
+    </marker>
+    <marker id="arrow2" markerWidth="11" markerHeight="11" refX="9" refY="5.5" orient="auto">
+      <path d="M 0 0 L 10 5.5 L 0 11 z" fill="#64748b" />
+    </marker>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1280" height="760" />
+  <text class="section" x="64" y="58">RAG 知识库核心数据模型</text>
+  <text class="note" x="64" y="88">知识库、文档来源、知识分块、标签之间通过中间表解耦，支撑详情页、文档关联、知识条目展示与检索。</text>
+
+  <!-- KnowledgeBase -->
+  <g transform="translate(64 138)">
+    <rect class="card" width="270" height="250" />
+    <rect class="header" width="270" height="58" rx="12" />
+    <text class="title" x="22" y="37">KnowledgeBase</text>
+    <text class="field" x="22" y="88">id</text>
+    <text class="field" x="22" y="116">name / description</text>
+    <text class="field" x="22" y="144">chunkSize / chunkOverlap</text>
+    <text class="field" x="22" y="172">similarityThreshold</text>
+    <text class="field" x="22" y="200">topK</text>
+    <text class="field" x="22" y="228">status</text>
+  </g>
+
+  <!-- KnowledgeBaseDocument -->
+  <g transform="translate(505 150)">
+    <rect class="card" width="270" height="220" />
+    <rect class="header" width="270" height="58" rx="12" />
+    <text class="title" x="22" y="37">KnowledgeBaseDocument</text>
+    <text class="field" x="22" y="88">id</text>
+    <text class="field" x="22" y="116">knowledgeBaseId</text>
+    <text class="field" x="22" y="144">documentId</text>
+    <text class="field" x="22" y="172">status</text>
+    <text class="field" x="22" y="200">sortOrder</text>
+  </g>
+
+  <!-- DocumentSource -->
+  <g transform="translate(946 138)">
+    <rect class="card" width="270" height="250" />
+    <rect class="header" width="270" height="58" rx="12" />
+    <text class="title" x="22" y="37">DocumentSource</text>
+    <text class="field" x="22" y="88">id</text>
+    <text class="field" x="22" y="116">title / originalName</text>
+    <text class="field" x="22" y="144">sourceType</text>
+    <text class="field" x="22" y="172">rawContent</text>
+    <text class="field" x="22" y="200">status / activeStatus</text>
+    <text class="field" x="22" y="228">chunkCount / deletedAt</text>
+  </g>
+
+  <!-- DocumentChunk -->
+  <g transform="translate(946 462)">
+    <rect class="card" width="270" height="230" />
+    <rect class="header" width="270" height="58" rx="12" />
+    <text class="title" x="22" y="37">DocumentChunk</text>
+    <text class="field" x="22" y="88">id / documentSourceId</text>
+    <text class="field" x="22" y="116">content / chunkIndex</text>
+    <text class="field" x="22" y="144">embedding</text>
+    <text class="field" x="22" y="172">chunkType</text>
+    <text class="field" x="22" y="200">reviewStatus / chunkStatus</text>
+  </g>
+
+  <!-- KnowledgeBaseTag -->
+  <g transform="translate(505 482)">
+    <rect class="card" width="270" height="170" />
+    <rect class="header" width="270" height="58" rx="12" />
+    <text class="title" x="22" y="37">KnowledgeBaseTag</text>
+    <text class="field" x="22" y="88">id</text>
+    <text class="field" x="22" y="116">knowledgeBaseId</text>
+    <text class="field" x="22" y="144">tagId</text>
+  </g>
+
+  <!-- KnowledgeTag -->
+  <g transform="translate(64 482)">
+    <rect class="card" width="270" height="170" />
+    <rect class="header" width="270" height="58" rx="12" />
+    <text class="title" x="22" y="37">KnowledgeTag</text>
+    <text class="field" x="22" y="88">id</text>
+    <text class="field" x="22" y="116">name / color</text>
+    <text class="field" x="22" y="144">sortOrder</text>
+  </g>
+
+  <!-- Relationships -->
+  <path class="rel" d="M 334 245 C 395 245, 438 245, 505 245" />
+  <text class="label" x="366" y="226">1:N 关联文档</text>
+
+  <path class="rel" d="M 775 245 C 837 245, 882 245, 946 245" />
+  <text class="label" x="808" y="226">N:1 指向文档</text>
+
+  <path class="rel" d="M 1081 388 C 1081 420, 1081 430, 1081 462" />
+  <text class="label" x="1098" y="430">1:N 切分</text>
+
+  <path class="rel" d="M 334 567 C 395 567, 438 567, 505 567" />
+  <text class="label" x="374" y="548">1:N 标签绑定</text>
+
+  <path class="rel" d="M 505 600 C 438 600, 395 600, 334 600" />
+  <text class="label" x="372" y="632">N:1 使用标签</text>
+
+  <path class="rel2" d="M 199 388 C 199 445, 323 455, 505 515" />
+  <text class="label" x="245" y="445">知识库拥有标签关系</text>
+
+  <path class="rel2" d="M 946 585 C 845 585, 820 460, 775 350" />
+  <text class="label" x="790" y="508">知识条目可记录 knowledgeBaseId</text>
+</svg>
