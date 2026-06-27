@@ -2,6 +2,34 @@
 
 一个基于 Next.js App Router 的全栈 AI 知识库管理平台，支持知识生产、知识管理、知识检索和知识消费的完整闭环。
 
+## 项目状态与分支说明
+
+> **当前阶段**：项目主体功能开发已完成，进入 **发布后维护与修复阶段**。
+
+| 分支 | 用途 |
+|------|------|
+| `main` | 稳定可演示版本，阶段性集成后合并 |
+| `fix/post-release-maintenance` | **当前维护分支** — Bug 修复、安全加固、性能优化、文档完善 |
+| `feature/*` | 各成员功能开发分支（开发完成后已合并） |
+
+### 维护分支主要工作
+
+- [ ] 补充认证/授权中间件（当前 API 无鉴权保护）
+- [ ] 引入单元测试框架（vitest）和核心逻辑测试覆盖
+- [ ] AI 提供商抽象层（当前 Embedding 硬编码 DashScope，LLM 需统一配置入口）
+- [ ] `.env.example` 模板已提供，确保新开发者可快速上手
+- [ ] 向量存储优化（当前为 SQLite 字符串字段，需评估迁移至专用向量数据库）
+- [ ] CI/CD 与容器化部署支持
+- [ ] API 请求速率限制
+- [ ] 全局错误边界与结构化日志
+
+### 已知限制
+
+1. **认证缺失**：所有 API 接口无鉴权保护，任何人可直接调用
+2. **SQLite 单机**：仅适用于开发和小规模使用，不支持并发写入
+3. **零测试覆盖**：295 个源文件无任何自动化测试
+4. **AI 提供商耦合**：Embedding 仅支持阿里云 DashScope，LLM 配置入口分散
+
 ## 项目介绍
 
 RAG Creater 是一个功能完整的 AI 知识库管理系统，旨在帮助企业和团队高效管理知识资产。平台提供从知识生产到消费的全流程支持，包括：
@@ -128,16 +156,28 @@ npm install
 
 ### 3. 环境配置
 
-创建 `.env` 文件并配置以下环境变量：
+项目根目录已提供 `.env.example` 模板文件，复制并重命名为 `.env`，然后填写实际值：
+
+```bash
+cp .env.example .env
+```
+
+**必填环境变量：**
 
 ```env
 # 数据库连接（SQLite）
 DATABASE_URL="file:./dev.db"
 
-# AI 模型 API Key（根据使用的 AI 服务配置）
-OPENAI_API_KEY="your_openai_api_key"
-# 或其他 AI 服务的 API Key
+# LLM 大模型 — 默认接口（兼容 OpenAI 格式）
+LLM_API_KEY="your_api_key"
+LLM_MODEL="gpt-4o-mini"
+LLM_BASE_URL="https://api.openai.com/v1"
+
+# Embedding 向量化 — 阿里云 DashScope
+DASHSCOPE_API_KEY="your_dashscope_api_key"
 ```
+
+**可选变量：** `OPENAI_API_KEY` / `VOYAGE_API_KEY` / `FEISHU_APP_ID` 等，详见 `.env.example`。
 
 ### 4. 数据库初始化
 
