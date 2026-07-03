@@ -1,14 +1,23 @@
 import { RAG_CONFIG } from "@/server/services/rag/config";
 import { rerankCandidates } from "@/server/services/rag/candidate-reranker";
-import { searchByBm25 } from "@/server/services/rag/bm25";
+import {
+  createBm25Index,
+  searchBm25Index,
+} from "@/server/services/rag/bm25";
 import { expandWithAdjacentChunks } from "@/server/services/rag/context-expander";
 import { buildRetrieveResponse } from "@/server/services/rag/context-builder";
 import { listKnowledgeChunks } from "@/server/services/rag/chunk-repository";
 import { embedQuery } from "@/server/services/rag/embedding";
-import { searchByExactTerms } from "@/server/services/rag/exact-term";
-import { fuseByRrf } from "@/server/services/rag/hybrid";
+import {
+  fuseByRrf,
+  type RankedRetrievalResult,
+} from "@/server/services/rag/hybrid";
 import { selectByMmr } from "@/server/services/rag/mmr";
-import { processQueryWithRewrite } from "@/server/services/rag/query-processor";
+import {
+  processQueryWithRewrite,
+  type RetrievalQuerySpec,
+  type RetrievalTargetSource,
+} from "@/server/services/rag/query-processor";
 import { applyMinScoreThreshold } from "@/server/services/rag/score-threshold";
 import { searchByVector } from "@/server/services/rag/vector-store";
 import type {
@@ -24,7 +33,7 @@ import type {
  * 职责：
  * 1. 读取候选知识片段并应用 scope/status 过滤。
  * 2. 对用户问题做规则化 rewrite / expansion。
- * 3. 针对多条 retrieval query 执行向量、BM25 和精确词检索。
+ * 3. 针对多条 retrieval query 执行向量检索和增强 BM25 检索。
  * 4. 使用 RRF 融合多路召回结果。
  * 5. 使用规则精排提升标题、摘要、来源和意图匹配结果。
  * 6. 过滤低于 minScore 的低相关候选，并按配置做 fallback 兜底。
@@ -43,24 +52,34 @@ export async function retrieveRagContexts(
   const topK = getTopK(mode);
   const candidateLimit = topK * RAG_CONFIG.candidateMultiplier;
   const processedQuery = await processQueryWithRewrite(request.query);
+  const bm25Index = createBm25Index(scopedChunks);
   const resultGroups = (
     await Promise.all(
-      processedQuery.retrievalQueries.map(async (retrievalQuery) => {
-        const vectorResults = await searchByVectorWithFallback(
-          scopedChunks,
-          retrievalQuery,
-          candidateLimit
-        );
-        const bm25Results = searchByBm25(scopedChunks, retrievalQuery).slice(
-          0,
-          candidateLimit
-        );
-        const exactTermResults = searchByExactTerms(
-          scopedChunks,
-          retrievalQuery
-        ).slice(0, candidateLimit);
+      processedQuery.structuredQueries.map(async (retrievalQuery) => {
+        const queryResultGroups: RankedRetrievalResult[][] = [];
 
-        return [vectorResults, bm25Results, exactTermResults];
+        if (shouldSearchSource(retrievalQuery, "vector")) {
+          const vectorResults = await searchByVectorWithFallback(
+            scopedChunks,
+            retrievalQuery.query,
+            candidateLimit
+          );
+          queryResultGroups.push(
+            attachQueryMetadata(vectorResults, retrievalQuery, "vector")
+          );
+        }
+
+        if (shouldSearchSource(retrievalQuery, "bm25")) {
+          const bm25Results = searchBm25Index(bm25Index, retrievalQuery.query).slice(
+            0,
+            candidateLimit
+          );
+          queryResultGroups.push(
+            attachQueryMetadata(bm25Results, retrievalQuery, "bm25")
+          );
+        }
+
+        return queryResultGroups;
       })
     )
   ).flat();
@@ -154,4 +173,27 @@ function getTopK(mode: RetrievalMode): number {
   if (mode === "fast") return RAG_CONFIG.fastTopK;
   if (mode === "detailed") return RAG_CONFIG.detailedTopK;
   return RAG_CONFIG.topK;
+}
+
+function shouldSearchSource(
+  query: RetrievalQuerySpec,
+  source: RetrievalTargetSource
+): boolean {
+  return query.targetSources.includes(source);
+}
+
+function attachQueryMetadata(
+  results: RankedRetrievalResult[],
+  query: RetrievalQuerySpec,
+  source: RetrievalTargetSource
+): RankedRetrievalResult[] {
+  const sourceWeight = RAG_CONFIG.retrievalSourceWeights[source];
+
+  return results.map((result) => ({
+    ...result,
+    query: query.query,
+    queryType: query.type,
+    queryWeight: query.weight,
+    sourceWeight,
+  }));
 }
