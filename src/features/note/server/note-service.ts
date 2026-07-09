@@ -25,6 +25,8 @@ function mapNoteSummary(note: {
   fileType: string;
   status: string;
   activeStatus: string;
+  enhancementEnabled: boolean;
+  enhancedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }) {
@@ -36,6 +38,8 @@ function mapNoteSummary(note: {
     fileType: note.fileType as "note",
     status: note.status,
     activeStatus: note.activeStatus,
+    enhancementEnabled: note.enhancementEnabled,
+    enhancedAt: note.enhancedAt?.toISOString() ?? null,
     createdAt: note.createdAt.toISOString(),
     updatedAt: note.updatedAt.toISOString(),
   };
@@ -51,6 +55,8 @@ function mapNoteDetail(note: {
   fileType: string;
   status: string;
   activeStatus: string;
+  enhancementEnabled: boolean;
+  enhancedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }) {
@@ -73,6 +79,8 @@ export async function listNotesService() {
       fileType: true,
       status: true,
       activeStatus: true,
+      enhancementEnabled: true,
+      enhancedAt: true,
       createdAt: true,
       updatedAt: true,
     },
@@ -94,6 +102,8 @@ export async function getNoteDetailService(id: string) {
       fileType: true,
       status: true,
       activeStatus: true,
+      enhancementEnabled: true,
+      enhancedAt: true,
       createdAt: true,
       updatedAt: true,
     },
@@ -121,6 +131,9 @@ export async function createNoteService(input: CreateNoteInput) {
       fileSize: byteLength(rawContent),
       sourceType: "markdown",
       rawContent,
+      enhancedContent: null,
+      enhancementEnabled: false,
+      enhancedAt: null,
       status: "pending",
       activeStatus: "disabled",
       chunkCount: 0,
@@ -141,6 +154,7 @@ export async function updateNoteService(id: string, input: UpdateNoteInput) {
     fileSize?: number;
     status?: "pending" | "parsed" | "uploaded";
     activeStatus?: "active" | "disabled";
+    enhancementEnabled?: boolean;
   } = {};
 
   if (input.title !== undefined) {
@@ -161,6 +175,10 @@ export async function updateNoteService(id: string, input: UpdateNoteInput) {
 
   if (input.activeStatus !== undefined) {
     data.activeStatus = input.activeStatus;
+  }
+
+  if (input.enhancementEnabled !== undefined) {
+    data.enhancementEnabled = input.enhancementEnabled;
   }
 
   const note = await prisma.documentSource.update({

@@ -1,6 +1,6 @@
 "use client";
 
-import { Plus, Save, Trash2 } from "lucide-react";
+import { Plus, Save, Sparkles, Trash2 } from "lucide-react";
 import type { KeyboardEvent } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -16,10 +16,14 @@ type NoteTopbarProps = {
   sourceEnabled: boolean;
   sourceToggleDisabled: boolean;
   sourceToggleLoading: boolean;
+  enhancementEnabled: boolean;
+  enhancementLoading: boolean;
+  enhancedAt: string | null;
   onTitleClick: () => void;
   onTitleChange: (title: string) => void;
   onTitleSave: () => void;
   onSourceEnabledChange: (enabled: boolean) => void;
+  onEnhancementEnabledChange: (enabled: boolean) => void;
   onSave: () => void;
   onCreate: () => void;
   onDelete: () => void;
@@ -34,10 +38,14 @@ export function NoteTopbar({
   sourceEnabled,
   sourceToggleDisabled,
   sourceToggleLoading,
+  enhancementEnabled,
+  enhancementLoading,
+  enhancedAt,
   onTitleClick,
   onTitleChange,
   onTitleSave,
   onSourceEnabledChange,
+  onEnhancementEnabledChange,
   onSave,
   onCreate,
   onDelete,
@@ -75,6 +83,11 @@ export function NoteTopbar({
             最后更新：{new Date(updatedAt).toLocaleString()}
           </p>
         ) : null}
+        {enhancedAt ? (
+          <p className="mt-1 text-xs text-muted-foreground">
+            最近增强：{new Date(enhancedAt).toLocaleString()}
+          </p>
+        ) : null}
       </div>
       <div className="flex items-center gap-2">
         <button
@@ -97,6 +110,31 @@ export function NoteTopbar({
               sourceEnabled ? "translate-x-6" : "translate-x-1"
             )}
           />
+        </button>
+        <button
+          type="button"
+          title={
+            enhancementEnabled
+              ? "知识增强已开启，RAG 将使用增强后的内容"
+              : "知识增强已关闭，RAG 将使用原始笔记"
+          }
+          aria-label="知识增强"
+          aria-pressed={enhancementEnabled}
+          disabled={disabled || enhancementLoading}
+          onClick={() => onEnhancementEnabledChange(!enhancementEnabled)}
+          className={cn(
+            "inline-flex h-9 shrink-0 items-center gap-1 rounded-md border px-3 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60",
+            enhancementEnabled
+              ? "border-blue-500 bg-blue-50 text-blue-700"
+              : "border-border bg-background text-muted-foreground hover:bg-muted"
+          )}
+        >
+          <Sparkles aria-hidden="true" className="size-4" />
+          {enhancementLoading
+            ? "增强中..."
+            : enhancementEnabled
+              ? "增强开"
+              : "增强关"}
         </button>
         <Button disabled={disabled} onClick={onSave} variant="outline">
           <Save aria-hidden="true" data-icon="inline-start" />

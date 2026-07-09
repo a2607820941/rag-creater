@@ -1,5 +1,7 @@
 import type {
   CreateNoteInput,
+  EnhanceNoteInput,
+  EnhanceNoteResponse,
   NoteDetail,
   NoteSummary,
   UpdateNoteInput,
@@ -61,4 +63,14 @@ export async function deleteNote(id: string) {
   });
 
   return parseResponse<{ id: string }>(response);
+}
+
+export async function enhanceNote(id: string, input: EnhanceNoteInput) {
+  const response = await fetch(`/api/notes/${id}/enhance`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+
+  return parseResponse<EnhanceNoteResponse>(response);
 }

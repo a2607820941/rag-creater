@@ -54,6 +54,9 @@ model DocumentSource {
 
   // Content
   rawContent String?
+  enhancedContent    String?
+  enhancementEnabled Boolean   @default(false)
+  enhancedAt         DateTime?
 
   // Chunking configuration
   chunkSize    Int @default(800)
@@ -94,6 +97,7 @@ model DocumentSource {
   @@index([sourceType])
   @@index([status])
   @@index([activeStatus])
+  @@index([enhancementEnabled])
 }
 
 model KnowledgeBaseDocument {

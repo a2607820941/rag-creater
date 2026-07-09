@@ -5,6 +5,7 @@ import * as React from "react";
 import {
   createNote,
   deleteNote,
+  enhanceNote,
   getNoteDetail,
   listNotes,
   updateNote,
@@ -34,12 +35,19 @@ export function NoteFeature() {
   const [detailLoading, setDetailLoading] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const [sourceToggleSaving, setSourceToggleSaving] = React.useState(false);
+  const [enhancing, setEnhancing] = React.useState(false);
+  const [enhancedAt, setEnhancedAt] = React.useState<string | null>(null);
   const [deleting, setDeleting] = React.useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
   const busy =
-    loading || detailLoading || saving || deleting || sourceToggleSaving;
+    loading ||
+    detailLoading ||
+    saving ||
+    deleting ||
+    sourceToggleSaving ||
+    enhancing;
   const sourceEnabled = activeNote?.activeStatus === "active";
 
   const applyActiveNote = React.useCallback((note: NoteDetail | null) => {
@@ -47,6 +55,7 @@ export function NoteFeature() {
     setActiveNoteId(note?.id ?? null);
     setDraftTitle(note?.title ?? "");
     setDraftRawContent(note?.rawContent ?? "");
+    setEnhancedAt(note?.enhancedAt ?? null);
   }, []);
 
   const refreshNotes = React.useCallback(async () => {
@@ -127,7 +136,17 @@ export function NoteFeature() {
         rawContent: draftRawContent,
       });
 
-      applyActiveNote(updatedNote);
+      if (updatedNote.enhancementEnabled) {
+        const enhanced = await enhanceNote(updatedNote.id, {
+          rawContent: draftRawContent,
+          enabled: true,
+          reparse: true,
+        });
+        applyActiveNote(enhanced.note);
+      } else {
+        applyActiveNote(updatedNote);
+      }
+
       await refreshNotes();
       return true;
     } catch (caught) {
@@ -231,6 +250,43 @@ export function NoteFeature() {
     }
   }
 
+  async function handleEnhancementEnabledChange(enabled: boolean) {
+    if (!activeNote || enhancing || saving) return;
+
+    setEnhancing(true);
+    setError(null);
+
+    try {
+      if (enabled) {
+        const saved = await saveCurrentNote();
+        if (!saved) return;
+
+        const result = await enhanceNote(activeNote.id, {
+          rawContent: draftRawContent,
+          enabled: true,
+          reparse: true,
+        });
+
+        applyActiveNote(result.note);
+        await refreshNotes();
+        return;
+      }
+
+      const result = await enhanceNote(activeNote.id, {
+        rawContent: draftRawContent,
+        enabled: false,
+        reparse: true,
+      });
+
+      applyActiveNote(result.note);
+      await refreshNotes();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "知识增强操作失败");
+    } finally {
+      setEnhancing(false);
+    }
+  }
+
   const showEmpty = !loading && notes.length === 0;
 
   return (
@@ -241,6 +297,9 @@ export function NoteFeature() {
           disabled={!activeNote || busy}
           onCreate={handleCreateNote}
           onDelete={() => setDeleteDialogOpen(true)}
+          onEnhancementEnabledChange={(enabled) =>
+            void handleEnhancementEnabledChange(enabled)
+          }
           onSave={() => void saveCurrentNote()}
           onSourceEnabledChange={(enabled) =>
             void handleSourceEnabledChange(enabled)
@@ -251,6 +310,11 @@ export function NoteFeature() {
           sourceEnabled={sourceEnabled}
           sourceToggleDisabled={!activeNote || busy}
           sourceToggleLoading={sourceToggleSaving}
+          enhancedAt={
+            activeNote?.enhancementEnabled && enhancedAt ? enhancedAt : null
+          }
+          enhancementEnabled={activeNote?.enhancementEnabled ?? false}
+          enhancementLoading={enhancing}
           title={draftTitle}
           titleEditing={titleEditing}
           updatedAt={activeNote?.updatedAt}

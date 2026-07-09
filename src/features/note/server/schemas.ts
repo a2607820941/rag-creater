@@ -15,10 +15,18 @@ export const updateNoteSchema = z
     rawContent: z.string().optional(),
     status: z.enum(["pending", "parsed", "uploaded"]).optional(),
     activeStatus: z.enum(["active", "disabled"]).optional(),
+    enhancementEnabled: z.boolean().optional(),
   })
   .refine((value) => Object.keys(value).length > 0, {
     message: "Provide at least one field to update",
   });
 
+export const enhanceNoteSchema = z.object({
+  rawContent: z.string().optional(),
+  enabled: z.boolean().optional(),
+  reparse: z.boolean().optional(),
+});
+
 export type CreateNoteInput = z.infer<typeof createNoteSchema>;
 export type UpdateNoteInput = z.infer<typeof updateNoteSchema>;
+export type EnhanceNoteInput = z.infer<typeof enhanceNoteSchema>;

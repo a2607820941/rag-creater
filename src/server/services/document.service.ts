@@ -94,7 +94,7 @@ async function reindexRetrievableDocumentChunks(documentSourceId: string) {
 export async function replaceTextChunksAndIndex(
   documentSourceId: string,
   chunks: TextChunk[],
-  options: { rawContent?: string }
+  options: { rawContent?: string; updateRawContent?: boolean }
 ) {
   await prisma.$transaction(async (tx) => {
     await tx.documentChunk.deleteMany({
@@ -115,14 +115,19 @@ export async function replaceTextChunksAndIndex(
       });
     }
 
+    const updateData: Prisma.DocumentSourceUpdateInput = {
+      status: "parsed",
+      chunkCount: chunks.length,
+      error: null,
+    };
+
+    if (options.updateRawContent !== false) {
+      updateData.rawContent = options.rawContent;
+    }
+
     await tx.documentSource.update({
       where: { id: documentSourceId },
-      data: {
-        status: "parsed",
-        rawContent: options.rawContent,
-        chunkCount: chunks.length,
-        error: null,
-      },
+      data: updateData,
     });
   });
 }
@@ -290,7 +295,10 @@ export async function parseDocument(
     if (isNote) {
       // Notes have rawContent in DB, no file on disk — parse as markdown
       onProgress?.("parse", 30);
-      rawContent = doc.rawContent ?? "";
+      rawContent =
+        doc.enhancementEnabled && doc.enhancedContent
+          ? doc.enhancedContent
+          : doc.rawContent ?? "";
     } else {
       onProgress?.("read", 10);
       const filePath = path.join(UPLOAD_DIR, id);
@@ -333,7 +341,10 @@ export async function parseDocument(
     }
 
     onProgress?.("save", 80);
-    await replaceTextChunksAndIndex(id, chunks, { rawContent });
+    await replaceTextChunksAndIndex(id, chunks, {
+      rawContent,
+      updateRawContent: !isNote,
+    });
 
     onProgress?.("done", 100);
     return { rawContent, chunkCount: chunks.length };

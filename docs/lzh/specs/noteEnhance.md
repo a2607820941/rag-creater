@@ -25,7 +25,7 @@ NoteEditor 编辑 Markdown
 ![退款流程图](https://example.com/refund.png)
 ```
 
-系统只会把这段 Markdown 语法作为普通文本保存，不会下载图片、识别图片内容，也不会把图片内容变成可检索文本。
+系统只会把这段 Markdown 语法作为普通文本保存，不会下载图片或文档资源，也不会把资源内容变成可检索文本。
 
 ## 2. 目标
 
@@ -46,12 +46,12 @@ NoteEditor 编辑 Markdown
 
 ## 3. 非目标
 
-第一版不处理以下能力：
+当前版本不处理以下能力：
 
 - 不支持本地相对路径附件，例如 `./images/a.png`，因为单篇笔记没有对应文件包。
 - 不支持 zip 包解析。
 - 不支持递归解析被引用 Markdown 中的资源。
-- 不支持所有外部 URL 文件类型，第一版优先支持远程图片 URL。
+- 不支持所有外部 URL 文件类型，当前优先支持图片和常见文档资源。
 - 不在前端直接解析 PDF、图片、Word 等文件。
 - 不把增强结果只保存在前端 state 中作为最终知识源。
 
@@ -274,29 +274,39 @@ POST /api/notes/[id]/enhance
 
 ## 8. Markdown 资源解析策略
 
-第一版只解析 Markdown 图片语法：
+当前版本解析 Markdown 第一层内联资源语法：
 
 ```md
 ![alt](https://example.com/a.png)
+[资料](https://example.com/a.pdf)
+[表格](https://example.com/a.xlsx)
+```
+
+支持类型：
+
+```text
+png / jpg / jpeg / webp / bmp
+pdf / docx / txt / md / csv / xlsx
 ```
 
 解析步骤：
 
 ```text
-1. 扫描 Markdown 中的图片引用。
+1. 扫描 Markdown 中的图片引用和普通链接引用。
 2. 记录引用在原文中的位置。
 3. 校验 URL 协议，只允许 http/https。
 4. 下载资源，限制大小和超时。
 5. 根据 Content-Type 或 URL 后缀判断文件类型。
-6. 如果是项目支持的图片类型，调用 parseFileContent(buffer, imageType)。
+6. 如果是项目支持的可增强类型，调用 parseFileContent(buffer, fileType)。
 7. 将解析结果插入原引用后方。
-8. 单个资源解析失败时，不中断整篇笔记增强。
+8. 普通网页链接等不支持类型保持原样，不插入失败块。
+9. 单个受支持资源解析失败时，不中断整篇笔记增强。
 ```
 
 插入格式：
 
 ```md
-> 知识增强：图片解析结果
+> 知识增强：内联资源解析结果
 > 原始资源：{url}
 > 文件类型：{mimeType}
 > 解析内容：{parsedText}
@@ -481,5 +491,5 @@ npm run db:push
 - 开启增强后解析笔记时使用 `enhancedContent`。
 - 关闭增强后解析笔记时使用 `rawContent`。
 - 保存原始笔记后，如果增强开启，会重新生成增强内容。
-- Markdown 图片 URL 能被解析并在增强内容中插入说明文本。
-- 单个图片解析失败不会导致整篇笔记增强失败。
+- Markdown 图片和常见文档 URL 能被解析并在增强内容中插入说明文本。
+- 单个受支持资源解析失败不会导致整篇笔记增强失败。

@@ -138,6 +138,11 @@ export async function extractFromDocument(
         result.candidates.length > 0
       ) {
         allCandidates.push(...result.candidates);
+      } else {
+        errors.push({
+          chunkIndex: chunk.chunkIndex,
+          error: result.error ?? "未能从该分段提取到知识条目",
+        });
       }
     } catch (err: unknown) {
       errors.push({
@@ -149,14 +154,17 @@ export async function extractFromDocument(
 
   // 4. 检查是否全部失败
   if (allCandidates.length === 0) {
+    const errorDetails = errors
+      .map((e) => `第${e.chunkIndex + 1}段: ${e.error}`)
+      .join("; ");
     return {
       success: false,
       error: {
         code: "EXTRACTION_FAILED",
         message:
           errors.length === chunks.length
-            ? "所有分段提炼均失败，可能是文档内容不适合提炼或 LLM 服务异常"
-            : `提炼失败: ${errors.map((e) => `第${e.chunkIndex + 1}段: ${e.error}`).join("; ")}`,
+            ? `所有分段提炼均失败: ${errorDetails || "可能是文档内容不适合提炼或 LLM 服务异常"}`
+            : `提炼失败: ${errorDetails}`,
       },
     };
   }
